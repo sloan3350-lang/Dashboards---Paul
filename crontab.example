@@ -1,0 +1,15 @@
+# Paul Sloan — scheduled Drive summaries
+# Install on a machine that stays powered on:  crontab crontab.example
+# Verify with:                                 crontab -l
+#
+# CRON_TZ makes cron evaluate the schedule in Eastern time, so 7:30 a.m. stays
+# 7:30 a.m. across the DST change. Supported by cronie and by Debian/Ubuntu
+# vixie-cron. If your cron rejects CRON_TZ, use the systemd timer in README.md
+# instead. Do not hardcode a UTC hour: it will drift by an hour twice a year.
+
+CRON_TZ=America/New_York
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# Replace /opt/dashboards with the real checkout path before installing.
+30 7 * * * cd /opt/dashboards && ./.venv/bin/python money_summary.py   >> logs/money.log 2>&1
+30 7 * * * cd /opt/dashboards && ./.venv/bin/python fishing_outlook.py >> logs/fishing.log 2>&1

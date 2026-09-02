@@ -1,0 +1,24 @@
+{
+  "auth": {
+    "client_secret_path": "~/.config/paul-dashboards/client_secret.json",
+    "token_path": "~/.config/paul-dashboards/token.json"
+  },
+  "money": {
+    "source_folder_id": "1C6CIwZDaxtzOwOxB4COHogSxiqBar7uv",
+    "source_folder_name": "Money Machine",
+    "skip_name_contains": ["DEAD leftover"]
+  },
+  "fishing": {
+    "source_folder_id": "18mooRTSYA60PLEsdZJBJ_OwvJRbFSpJr",
+    "source_folder_name": "Hunting and Fishing",
+    "source_folder_confirmed": false,
+    "spots_file_id": "1rCf1WtZYtP40_ASh86Eqw3OjuF8MGqfb",
+    "spots_file_name": "Surf Command - Master Research & Ops Record",
+    "spots_file_confirmed": false
+  },
+  "output": {
+    "chief_of_staff_folder_id": "1CC1Gaif3c8-QyZPZE1ehVhxat2bG7pfU",
+    "chief_of_staff_folder_name": "Chief of Staff"
+  },
+  "timezone": "America/New_York"
+}
