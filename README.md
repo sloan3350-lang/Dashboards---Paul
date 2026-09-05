@@ -48,7 +48,9 @@ in full: `dusk, Dania Pier. One line only.` No measurements. Run against Drive
 as it stands today, `fishing_outlook.py` will correctly write "no data yet"
 every morning, indefinitely, until something starts logging conditions.
 
-**4. There is no spots sheet.** The closest thing is
+**4. There is no spots sheet.** (Partly addressed: `surf-command.html` now lives
+in this repo, see below, but `fishing_outlook.py` still reads the Drive record.)
+The closest thing is
 `Surf Command — Master Research & Ops Record`, a markdown research document in
 the `Surf Command` folder. Its section 12 carries the condition thresholds this
 script uses and section 13 carries the spot rotation table it parses. The
@@ -110,3 +112,23 @@ catches up a run the machine slept through:
 plus write access to the Chief of Staff folder. `drive.readonly` cannot create
 the summary, and `drive.file` only sees files the script itself created, so it
 cannot read the bot files. Narrow it if you would rather grant less.
+
+## `surf-command.html`
+
+The Surf Command app itself, published as an Artifact at
+`claude.ai/code/artifact/dd43faf9-0382-48c9-8ebb-c0707ee6dc7f`. This file is the
+source of that Artifact and is the version to edit; republish it to the same URL
+rather than creating a new one. It is self-contained and runs offline from
+`file://` — the only things that need network are the live weather fetch, the
+Esri and Sentinel-2 map layers and the sargassum search. The USGS tile pack is
+base64-embedded, which is why the file is 8 MB.
+
+Tabs: Plan, Conditions, Playbook, Kit, Spots, Rules, **Charters**, Keep?
+
+The Charters tab covers seat-fare drift and head boats from Riviera Beach to Key
+West — sailing times computed in the file, fares, what the ticket includes, the
+braid-versus-mono rule per boat, booking and review notes, and a comparison
+table. Marina pins are teal bow triangles on the map so they never read as a
+beach access. Fares and schedules were read on 5 September 2026 and go stale
+fast; the tier badge on each card says whether it came from the operator or from
+an aggregator.
