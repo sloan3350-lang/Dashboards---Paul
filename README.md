@@ -126,9 +126,11 @@ base64-embedded, which is why the file is 8 MB.
 Tabs: Plan, Conditions, Playbook, Kit, Spots, Rules, **Charters**, Keep?
 
 The Charters tab covers seat-fare drift and head boats from Riviera Beach to Key
-West — sailing times computed in the file, fares, what the ticket includes, the
-braid-versus-mono rule per boat, booking and review notes, and a comparison
-table. Marina pins are teal bow triangles on the map so they never read as a
+West — twelve boats, five of them in the Keys (Sailors Choice at Key Largo,
+Miss Islamorada and Captain Michael at Islamorada, Marathon Lady at Vaca Cut,
+Gulfstream IV at Key West) — with sailing times computed in the file, fares,
+what the ticket includes, the braid-versus-mono rule per boat, booking and
+review notes, and a comparison table. Marina pins are teal bow triangles on the map so they never read as a
 beach access. Fares and schedules were read on 5 September 2026 and go stale
 fast; the tier badge on each card says whether it came from the operator or from
 an aggregator.
