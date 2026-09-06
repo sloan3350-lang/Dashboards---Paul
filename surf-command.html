@@ -87,6 +87,20 @@ h1 em{color:var(--fg2);font-style:normal;font-weight:500}
 .b-braid{background:rgba(207,74,61,.18);color:#EF9187}
 .b-mono{background:rgba(63,169,95,.18);color:#7DD79A}
 .b-ask{background:rgba(224,163,43,.18);color:#EDC168}
+.alert{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:baseline;
+ padding:9px 0;border-bottom:1px solid rgba(28,74,92,.55);font-size:13px}
+.alert:last-child{border-bottom:0}
+.alert i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-top:4px}
+.alert b{color:#D6E8F0}
+.alert .cd{font:700 10px/1.4 ui-monospace,Menlo,monospace;letter-spacing:.07em;text-transform:uppercase;
+ color:var(--fg2);white-space:nowrap;text-align:right}
+.alert .cd.soon{color:#EFCB84}
+.alert .cd.now{color:#7DD79A}
+.sclock{border:1px solid var(--line);border-left-width:4px;border-radius:10px;background:var(--bg2);
+ margin:9px 0;padding:13px 14px}
+.sclock .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.sclock .nm{font-weight:700;font-size:15px;letter-spacing:-.012em}
+.sclock dl{margin-top:10px}
 .clabel{display:inline-block;transform:translateX(-100%);white-space:nowrap;
  font:600 10px/1 ui-sans-serif,sans-serif;color:#D6E8F0;text-shadow:0 1px 3px var(--sea),0 0 3px var(--sea);padding-right:5px}
 .clabel.sm{font-size:9px;color:#A9C3CF}
@@ -339,6 +353,18 @@ body.cmode a,body.cmode button,body.cmode li{cursor:crosshair!important}
 <div id="pane-fc" class="pane on">
   <h2 style="margin-top:14px">The next seven evenings</h2>
   <p style="font-size:13px;color:var(--fg2)">Built from legal hours, tide turns and sunset. All three are computed in the file, so this works with no network. Fetch the forecast to layer wind, surf and bugs on top.</p>
+
+  <div class="card" id="alertcard">
+    <h3>Season alerts</h3>
+    <div class="zsub" id="alertsub"></div>
+    <div id="seasonalerts"></div>
+    <p class="why" style="margin-top:11px"><b>What this is not:</b> nobody publishes a live feed of where people
+    are catching fish, so this page does not pretend to have one. What it has is the calendar, which is knowable in
+    advance and is what you actually plan around. The closest thing to a real-time report is the party-boat fleet on
+    the Charters tab — they fish the same water every day and will tell you what came over the rail if you call the
+    booth. Full detail and the gear list for each season sit on the Playbook tab.</p>
+  </div>
+
   <div id="plandays"></div>
   <button class="bigbtn" id="fcbtn" style="margin-top:14px">Add wind, surf and bug risk to these evenings</button>
   <p class="fnote" id="fcnote">Weather is read at 7 PM local, the middle of your window — not a daily average.</p>
@@ -348,6 +374,22 @@ body.cmode a,body.cmode button,body.cmode li{cursor:crosshair!important}
 
 <!-- ===== PLAYBOOK ===== -->
 <div id="pane-play" class="pane">
+  <h2 style="margin-top:14px">Season clock</h2>
+  <p style="font-size:13px;color:var(--fg2)">Every season that governs a trip from this address, sorted by what
+  changes soonest. Legal seasons are FWC harvest windows and carry a source link; bite seasons are fishing pattern,
+  not law, and are marked as such. Dates are computed against today in the file, so this works offline and does not
+  go stale between openings. The lobster sport season is calculated from the rule &mdash; the last consecutive
+  Wednesday and Thursday of July &mdash; rather than hard-coded to one year.</p>
+  <div class="months" id="seasonfilter">
+    <button class="mo" data-s="all" aria-pressed="true">ALL</button>
+    <button class="mo" data-s="soon" aria-pressed="false">NEXT 60 DAYS</button>
+    <button class="mo" data-s="legal" aria-pressed="false">LEGAL SEASONS</button>
+    <button class="mo" data-s="bite" aria-pressed="false">BITE SEASONS</button>
+    <button class="mo" data-s="on" aria-pressed="false">RUNNING NOW</button>
+  </div>
+  <div class="count" id="seasoncount"></div>
+  <div id="seasonclock"></div>
+
   <h2>Seasonal playbook</h2>
   <p style="font-size:13px;color:var(--fg2)">Tap a month. Defaults to now.</p>
   <div class="months" id="months"></div>
@@ -2748,6 +2790,242 @@ function renderMonths(){
 document.getElementById('months').addEventListener('click',e=>{
  const b=e.target.closest('.mo');if(!b)return;selMonth=+b.dataset.m;renderMonths()});
 
+/* ===== season clock =====
+   open:[[m,d,m,d]] are the windows the season is ON \u2014 harvest-open for a
+   legal season, running for a bite season. Windows wrap the year end. The
+   lobster sport season is a rule, not a date: the last consecutive Wednesday
+   and Thursday of July, computed per year so this does not expire.
+   Legal windows read off FWC species pages and FWC news releases on
+   5 September 2026; bite windows are pattern, stated as pattern. */
+const SEASONS=[
+{n:"Snook harvest",short:"Inlets on moving tide, the beach after 6 p.m., and the run.",kind:"legal",tier:"B",open:[[2,1,5,31],[9,1,12,14]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/snook/",
+ what:"Atlantic harvest closed <b>Dec 15\u2013Jan 31</b> and <b>Jun 1\u2013Aug 31</b>. Open otherwise, one fish, 28\u201332 inch slot.",
+ where:"Hillsboro Inlet on moving tide, Fort Lauderdale beach after 6 p.m., the inlet edges at Boynton and Jupiter. During the run, the open beach anywhere bait is moving.",
+ gear:"Flair Hawk jig in inlet current after dark, walk-the-dog topwater in the first light window, live mullet during the run. Legend Tournament with 20 lb braid and a heavy fluoro leader.",
+ need:"<b>Snook permit on top of the licence</b>, every time, open season or not.",
+ note:"<b>The Keys are a different region.</b> Monroe sits in FWC's Southwest Region: slot 28\u201333 inches, closed Dec 1 through the end of February and May 1 through Sep 30. Do not carry the Broward dates south."},
+
+{n:"Spiny lobster \u2014 sport season (mini-season)",short:"Two days in the water. Licence plus lobster permit, not the shoreline licence.",kind:"legal",tier:"B",special:"mini",
+ src:"https://myfwc.com/fishing/saltwater/recreational/lobster/",
+ what:"Two days only, the <b>last consecutive Wednesday and Thursday of July</b>. The single most date-critical thing on this page.",
+ where:"Keys patch reefs and the Broward second reef, all of it in the water. There is no shore-based version of this.",
+ gear:"Tickle stick and net, a gauge on a lanyard, dive flag, and a bag. Measure in the water, not in the boat.",
+ need:"<b>Saltwater licence plus the lobster permit.</b> The free resident shoreline licence does <b>not</b> cover swimming or diving, so it does not cover this \u2014 that is the same trap the Rules tab flags for the Keys.",
+ note:"<b>Six per person per day in Monroe County and Biscayne National Park; twelve everywhere else.</b> Carapace must exceed three inches, measured in the water, and a measuring device must be on you. No egg-bearing females. Lobsters stay whole \u2014 no separating tails. Night diving is prohibited during the two-day sport season."},
+
+{n:"Spiny lobster \u2014 regular season",short:"Eight quiet months on the same reefs the July crowd fishes.",kind:"legal",tier:"B",open:[[8,6,3,31]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/lobster/",
+ what:"<b>Aug 6 through Mar 31.</b> Eight months, no crowd, same limits, and nobody plans for it because the two days in July get all the attention.",
+ where:"Same reefs as the sport season, minus the traffic. Keys patch reefs off Islamorada and Marathon are the quality water.",
+ gear:"As the sport season. Bag limits and the three-inch carapace do not change.",
+ need:"Saltwater licence plus the lobster permit. Diving, so again not the shoreline licence.",
+ note:"Six per person per day in Monroe and Biscayne National Park, twelve elsewhere. If the point is lobster rather than the event, September through November is the trip to plan."},
+
+{n:"Stone crab",short:"Claws only, 2\u215e inch minimum. Read the trap rules first.",kind:"legal",tier:"B",open:[[10,15,5,1]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/stone-crabs/",
+ what:"Harvest open <b>Oct 15 through May 1</b>, closed May 2. Claws only, and the minimum claw is 2\u215e inches.",
+ where:"Hard bottom and rocky structure in shallow water; the Keys and Florida Bay are the productive end.",
+ gear:"Recreational trap rules are their own regime and are not summarised here \u2014 read the FWC page before you set anything.",
+ need:"Saltwater licence. Trap registration rules apply on top.",
+ note:"Marginal for how you fish, listed because it is a genuine Florida season that opens while you are already in the winter pompano rotation."},
+
+{n:"Hogfish \u2014 Atlantic",short:"Reef fish, so a boat or a dive. Sixteen inch fork.",kind:"legal",tier:"B",open:[[5,1,10,31]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/hogfish/",
+ what:"Atlantic recreational harvest open <b>May 1 through Oct 31</b>. Sixteen inch fork length minimum.",
+ where:"Reef, which means a boat or a dive. Not a shore fish anywhere on this coast.",
+ gear:"Spear or a light bottom rig on a charter. The Keys head boats put you on them.",
+ need:"Saltwater licence. Spearfishing is banned in Monroe from Long Key north and within 100 yards of any pier, bridge or public beach \u2014 see the Rules tab before you take a gun anywhere.",
+ note:"The Atlantic and Gulf hogfish rules differ. This row is the Atlantic side, which is your water."},
+
+{n:"Shallow-water grouper \u2014 Atlantic",short:"Charter water. Book bottom trips in May, not March.",kind:"legal",tier:"B",open:[[5,1,12,31]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/groupers/",
+ what:"<b>Closed Jan 1 through Apr 30</b> in all Atlantic state and federal waters, including all state waters off Monroe on both sides. Black, red, scamp, yellowfin, yellowmouth, rock hind, red hind, coney and graysby.",
+ where:"Charter water. The bottom boats on the Charters tab fish it; you will not reach a legal grouper from the sand.",
+ gear:"House bottom rig on a head boat. Non-stainless hooks with natural bait and a descending device rigged and ready are required south of 28\u00b0 N.",
+ need:"Saltwater licence, covered by the vessel licence on any of the head boats.",
+ note:"<b>Gag has a shorter season than the rest</b> \u2014 the Keep? tab carries the per-species rows. Book a bottom trip in May, not in March."},
+
+{n:"Greater amberjack \u2014 Atlantic",short:"April is shut. Check before paying for a spring bottom charter.",kind:"legal",tier:"B",open:[[5,1,3,31]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/amberjack/",
+ what:"Atlantic harvest <b>closed the whole of April</b> in state and federal waters, open the rest of the year.",
+ where:"Wrecks and deep structure off Haulover and Miami. Kelley Fleet's water more than Broward's.",
+ gear:"Heavy bottom outfit; the house rods on the head boats are built for it.",
+ need:"Saltwater licence, covered aboard.",
+ note:"A one-month closure is exactly the kind of thing that ruins a booked trip. Check this row before you pay for an April bottom charter."},
+
+{n:"Mutton snapper spawning limit",inv:true,short:"Reduced bag on the Keys reef through the spawn.",kind:"legal",tier:"B",open:[[4,1,6,30]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/snappers/",
+ what:"Not a closure \u2014 a <b>reduced bag from Apr 1 through Jun 30</b> in Atlantic state waters, when the recreational limit drops to five mutton inside the ten-snapper aggregate to protect spawning aggregations.",
+ where:"Keys patch reefs and the Islamorada humps, which is where the aggregations form and where the head boats fish.",
+ gear:"Knocker rig on fluorocarbon, live pilchards or ballyhoo. Night trips outfish day trips on mutton.",
+ need:"Saltwater licence, covered aboard.",
+ note:"This row is ON during the spawn, meaning the restriction is in force \u2014 read it as a limit that applies, not as a season that is open."},
+
+{n:"Shore shark permit",short:"Free permit and course, renewed annually. Renew in January.",kind:"legal",tier:"B",open:[[1,1,12,31]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/sharks/",
+ what:"No closed season, but you cannot target sharks from shore without the <b>free shore-based permit</b> and the <b>free Shark-Smart course</b>, renewed annually, age 16 and up, seniors and licence-exempt anglers included.",
+ where:"Any beach you already fish. The permit is what makes a night session with cut bait legal rather than a citation.",
+ gear:"Shoremaster with 50 lb braid on the BG MQ 8000, non-stainless circle hook, and a dehooking device you can actually reach.",
+ need:"Permit plus course. <b>No chumming from the beach, for any species.</b> Twenty-nine species are prohibited and stay in the water.",
+ note:"Renew it in January so it never expires mid-run. The bite window that matters is the blacktip and spinner migration \u2014 separate row below."},
+
+{n:"Pompano \u2014 the bite",short:"First trough past the bar. High-low rig, sand fleas or Fishbites.",kind:"bite",tier:"C",open:[[11,1,4,30]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/permit/",
+ what:"<b>No closed season</b> \u2014 six per person, eleven inch fork length, all year. The season is a bite season: <b>November through April</b>, peaking January and February.",
+ where:"The trough just past the first bar. Fort Lauderdale citywide after 6 p.m., Gulfstream Park for the free lot, Mizell-Johnson when you need a midday option.",
+ gear:"High-low rig, #1\u20132 circle hooks, sand fleas or Fishbites; pompano jig worked on the retrieve between soaks. Fishbites hold thirty minutes and are why a three-spike spread is viable.",
+ need:"Licence only.",
+ note:"Cleanest water and least weed of the year. Fish the day a front arrives on falling pressure, not the bluebird day after it."},
+
+{n:"Blacktip and spinner shark run",short:"Palm Beach to Jupiter. Permit first, and the run is weakening.",kind:"bite",tier:"C",open:[[1,1,3,31]],
+ src:"https://myfwc.com/wildlifehabitats/profiles/saltwater/sharks/blacktip-shark/",
+ what:"The winter migration down this coast, roughly <b>January through March</b>, peaking mid-February.",
+ where:"Palm Beach, Singer Island, Jupiter Inlet and the Boca stretch \u2014 north of you, and worth the drive in February.",
+ gear:"Shoremaster and the 8000, heavy leader, cut mullet. Permit first.",
+ need:"Shore-based shark permit and the Shark-Smart course, as above.",
+ note:"<b>Flagged honestly:</b> FAU research indicates this migration has weakened as coastal water warms, with more sharks holding in central and north Florida. Treat a big February run as possible, not as reliable."},
+
+{n:"Mullet run",short:"The best six weeks of the year. Fish the edges of the pods.",kind:"bite",tier:"C",open:[[8,25,10,31]],
+ src:"",
+ what:"The best beach fishing of the year on this coast. Bait pushes south along the sand from late August and runs through October.",
+ where:"The open beach anywhere the pods are moving. Fort Lauderdale citywide from 6 p.m., Lauderdale-by-the-Sea from 4 p.m. on a weekday, the inlets on either side of the tide.",
+ gear:"Match the bait, silver profiles four to six inches. <b>Fish the edges of a pod, never the middle.</b> Live mullet if you can throw a net; the Shoremaster is the second spike for tarpon and oversized snook.",
+ need:"Snook permit if you intend to keep one \u2014 harvest reopens Sep 1.",
+ note:"Drop the pompano rotation for it. Nothing else on this calendar produces like six weeks of moving bait."},
+
+{n:"Tarpon on the beach",short:"Inlet edges at first light. Release only, and over 40 inches stays wet.",kind:"bite",tier:"C",open:[[4,1,7,31]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/tarpon/",
+ what:"Spring and early summer along the beaches and inlet edges, then again on the mullet run.",
+ where:"Inlet edges on moving tide; the beach at first light when they are laid up.",
+ gear:"Live mullet or a large swimbait on the Shoremaster. Anything lighter is a long fight and a dead fish.",
+ need:"<b>Catch and release only.</b> A tarpon over 40 inches may not be removed from the water at all.",
+ note:"Listed so the release rule is in front of you before you hook one, not after."},
+
+{n:"Spanish mackerel and bluefish",short:"Piers and clear winter water. Spoons and wire.",kind:"bite",tier:"C",open:[[12,1,3,31]],
+ src:"https://myfwc.com/fishing/saltwater/recreational/spanish-mackerel/",
+ what:"Winter clear-water fish that show up on the same trips as the pompano bite.",
+ where:"Piers and the open beach when bait is thick and the water is green-clear. Dania and Pompano piers hold them.",
+ gear:"Casting spoons and fast-retrieve plugs. <b>Wire or heavy fluoro</b> \u2014 both species cut light leader without noticing.",
+ need:"Licence only. Spanish 12 inch fork, 15 per day; bluefish 12 inch fork, 3 per day on the Atlantic.",
+ note:"Free fish on a pompano trip. Carry one spoon and one wire leader in the bag from December."},
+
+{n:"Kingfish and sailfish \u2014 charter season",short:"The drift fleet's season. Book a boat when the sand goes cold.",kind:"bite",tier:"C",open:[[11,1,3,31]],
+ src:"",
+ what:"The winter charter bite the drift fleet lives on, roughly November through March.",
+ where:"The Charters tab. Blue Heron out of Riviera Beach fishes the hardest current of the fleet, and Catch My Drift and Flamingo are the after-work-distance boats.",
+ gear:"House outfits. This is the season to fish a boat rather than argue about braid.",
+ need:"Nothing beyond the fare \u2014 the vessel licence covers you aboard.",
+ note:"<b>It inverts your beach calendar:</b> the charter bite peaks in the same months the surf goes cold and flat. Book a boat in January instead of standing on empty sand."},
+
+{n:"Keys reef night bite",short:"Night trips out of Islamorada and Marathon. Both ban braid.",kind:"bite",tier:"C",open:[[6,1,9,30]],
+ src:"",
+ what:"Summer nights on the patch reefs for yellowtail and mangrove snapper, when the day bite is slow and hot.",
+ where:"Captain Michael at Robbie's runs a night trip every night; Marathon Lady swaps its winter afternoon trip for the 6:30 p.m. night snapper run in summer; Sailors Choice runs late Friday and Saturday.",
+ gear:"Light knocker rigs on fluorocarbon and a chum line. <b>Both Islamorada boats ban braid in writing</b> \u2014 fish the house rod.",
+ need:"Licence covered aboard. Mutton bag is reduced Apr through Jun, see that row.",
+ note:"The reason to drive to Marathon in July rather than in February."}];
+
+const SKIND={legal:["#4B9FD6","Legal season"],bite:["#3FA95F","Bite season"]};
+function _md(d){return (d.getMonth()+1)*100+d.getDate()}
+function winHas(w,d){const m=_md(d),a=w[0]*100+w[1],b=w[2]*100+w[3];
+ return a<=b?(m>=a&&m<=b):(m>=a||m<=b)}
+/* The sport season is defined by a rule, so compute it rather than storing a
+   date that expires: the last consecutive Wednesday and Thursday of July.
+   Anchor on the last THURSDAY and step back a day. Anchoring on the last
+   Wednesday is wrong whenever July 31 is itself a Wednesday — 2019 ran
+   July 24-25 for exactly that reason, because both days must fall in July.
+   2030 is the next year it matters. */
+function miniSeason(y){const d=new Date(y,6,31);while(d.getDay()!==4)d.setDate(d.getDate()-1);
+ return[new Date(y,6,d.getDate()-1),new Date(y,6,d.getDate())]}
+function seasonOn(s,d){
+ if(s.special==="mini"){const m=miniSeason(d.getFullYear());
+  return d.toDateString()===m[0].toDateString()||d.toDateString()===m[1].toDateString()}
+ return (s.open||[]).some(w=>winHas(w,d))}
+function dayAdd(d,n){return new Date(d.getFullYear(),d.getMonth(),d.getDate()+n)}
+function seasonScan(s,now){
+ const t0=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+ const on=seasonOn(s,t0);
+ let at=null,days=null;
+ for(let i=1;i<=400;i++){const d=dayAdd(t0,i);
+  if(seasonOn(s,d)!==on){at=d;days=i;break}}
+ let since=null;
+ for(let i=1;i<=30;i++){const d=dayAdd(t0,-i);
+  if(seasonOn(s,d)!==on){since=i;break}}
+ return{on:on,at:at,days:days,since:since}}
+const SDATE=d=>d.toLocaleDateString([],{month:'short',day:'numeric',year:d.getFullYear()!==new Date().getFullYear()?'numeric':undefined});
+function seasonLine(s,sc){
+ if(!sc.at)return sc.on?"Open year round":"No change in the next 400 days";
+ const v=s.inv?(sc.on?"lifts":"applies"):(sc.on?"closes":"opens");
+ return v+" in "+sc.days+(sc.days===1?" day":" days")+" \u00b7 "+SDATE(sc.at)}
+
+let sFilter="all";
+function renderSeasons(){
+ const host=document.getElementById('seasonclock');if(!host)return;
+ const now=new Date();
+ const rows=SEASONS.map(s=>({s:s,sc:seasonScan(s,now)}))
+  .sort((a,b)=>(a.sc.days==null?9e9:a.sc.days)-(b.sc.days==null?9e9:b.sc.days));
+ let shown=0;
+ host.innerHTML=rows.map(r=>{
+  const s=r.s,sc=r.sc,k=SKIND[s.kind];
+  if(sFilter==="soon"&&!(sc.days!=null&&sc.days<=60))return"";
+  if(sFilter==="legal"&&s.kind!=="legal")return"";
+  if(sFilter==="bite"&&s.kind!=="bite")return"";
+  if(sFilter==="on"&&!sc.on)return"";
+  shown++;
+  const badge=s.inv
+   ?(sc.on?'<span class="badge b-no">Reduced bag in force</span>':'<span class="badge b-go">Full bag applies</span>')
+   :(sc.on?'<span class="badge b-go">'+(s.kind==="legal"?"Open now":"Running now")+'</span>'
+          :'<span class="badge b-no">'+(s.kind==="legal"?"Closed now":"Out of season")+'</span>');
+  const urgent=sc.days!=null&&sc.days<=45;
+  return '<div class="sclock" style="border-left-color:'+k[0]+'"><div class="top"><div>'
+   +'<div class="nm">'+s.n+'</div>'
+   +'<div class="sub">'+k[1]+' \u00b7 <span class="'+(urgent?"flag":"")+'">'+seasonLine(s,sc)+'</span></div></div>'
+   +badge+'</div>'
+   +'<div class="meta"><span class="tag t'+s.tier+'">TIER '+s.tier+'</span>'
+   +(s.kind==="bite"?'<span class="pill">PATTERN, NOT LAW</span>':'<span class="pill hot">FWC RULE</span>')+'</div>'
+   +'<dl><div class="row"><dt>What</dt><dd>'+s.what+'</dd></div>'
+   +'<div class="row"><dt>Where</dt><dd>'+s.where+'</dd></div>'
+   +'<div class="row"><dt>Gear</dt><dd>'+s.gear+'</dd></div>'
+   +'<div class="row"><dt>Need</dt><dd class="flag">'+s.need+'</dd></div>'
+   +'<div class="row"><dt>Read</dt><dd>'+s.note+'</dd></div></dl>'
+   +(s.src?'<div class="acts"><a href="'+s.src+'" target="_blank" rel="noopener">FWC source</a></div>':'')
+   +'</div>'}).join("");
+ const c=document.getElementById('seasoncount');
+ if(c)c.textContent=shown+(shown===1?" season":" seasons")+" \u00b7 computed against "+
+  now.toLocaleDateString([],{month:'long',day:'numeric',year:'numeric'});
+ if(!shown)host.innerHTML='<div class="card">Nothing matches that filter. Tap ALL.</div>';
+}
+function renderSeasonAlerts(){
+ const host=document.getElementById('seasonalerts');if(!host)return;
+ const now=new Date();
+ const rows=SEASONS.map(s=>({s:s,sc:seasonScan(s,now)}))
+  .filter(r=>(r.sc.days!=null&&r.sc.days<=45)||(r.sc.since!=null&&r.sc.since<=14))
+  .sort((a,b)=>{const A=a.sc.since!=null&&a.sc.since<=14?-1:a.sc.days,B=b.sc.since!=null&&b.sc.since<=14?-1:b.sc.days;
+   return A-B});
+ const sub=document.getElementById('alertsub');
+ if(sub)sub.textContent="Anything opening, closing or newly running within 45 days. Computed in the file against "
+  +now.toLocaleDateString([],{month:'long',day:'numeric',year:'numeric'})+".";
+ if(!rows.length){host.innerHTML='<div class="why">Nothing on the calendar changes in the next 45 days. '
+  +'The Playbook tab carries the full clock.</div>';return}
+ host.innerHTML=rows.map(r=>{
+  const s=r.s,sc=r.sc,k=SKIND[s.kind];
+  const fresh=sc.since!=null&&sc.since<=14;
+  const on=s.inv?"in force":(s.kind==="legal"?"open":"running");
+  const cd=fresh?(sc.on?(s.inv?"just applied":"just opened"):(s.inv?"just lifted":"just closed"))+" \u00b7 "+sc.since+"d ago"
+                :(s.inv?(sc.on?"lifts":"applies"):(sc.on?"closes":"opens"))+" in "+sc.days+"d";
+  const cls=fresh?"now":(sc.days<=14?"soon":"");
+  return '<div class="alert"><i style="background:'+k[0]+'"></i>'
+   +'<div><b>'+s.n+'</b><br><span style="color:var(--fg2)">'
+   +(sc.on?(s.inv?"In force":(s.kind==="legal"?"Open":"Running"))+" now, ":"Not "+on+", ")
+   +(sc.at?SDATE(sc.at):"no change scheduled")+'. '+(s.short||'')+'</span></div>'
+   +'<span class="cd '+cls+'">'+cd+'</span></div>'}).join("");
+}
+document.getElementById('seasonfilter').addEventListener('click',e=>{
+ const b=e.target.closest('.mo');if(!b)return;sFilter=b.dataset.s;
+ document.querySelectorAll('#seasonfilter .mo').forEach(x=>x.setAttribute('aria-pressed',x===b));
+ renderSeasons()});
+
 /* ===== drift charters =====
    Next-departure is computed from the trip table rather than fetched, so the
    page still answers "what can I get on tonight" with no network. */
@@ -2925,6 +3203,8 @@ if(location.protocol!=="file:"){const sn=document.getElementById('sandboxnote');
 loadTides();
 renderRegs();
 renderCharters();
+renderSeasons();
+renderSeasonAlerts();
 renderFish();
 renderRigs();
 renderPlan();
@@ -3073,5 +3353,5 @@ document.addEventListener('keydown',e=>{
 addEventListener('beforeunload',e=>{if(CM.items.length){e.preventDefault();e.returnValue=''}});
 cmBtnLabel();
 
-setInterval(()=>{renderMoon();renderList();renderCall();renderPlan()},60000);
+setInterval(()=>{renderMoon();renderList();renderCall();renderPlan();renderSeasonAlerts()},60000);
 </script>

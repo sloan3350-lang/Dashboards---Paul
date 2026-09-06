@@ -6,7 +6,12 @@ one-line outlook to the Chief of Staff folder.
 
 Reads only. Fetches nothing from the web: if the bot did not log a condition,
 this script does not go and look it up. When no conditions were logged it says
-"no data yet" and stops.
+"no data yet" for the conditions line.
+
+Every summary also carries the season block from season_alerts.py — what opens,
+closes or starts running in the next 45 days, with where to go and what to
+bring. That block is pure date arithmetic against a table, so it is present and
+correct even on the days the fishing bot logged nothing.
 
 Usage:
   python3 fishing_outlook.py               write to the Chief of Staff folder
@@ -22,6 +27,7 @@ import sys
 import zoneinfo
 
 import drive_common as dc
+import season_alerts
 
 # Thresholds below are transcribed from the spots record, "Surf Command -
 # Master Research & Ops Record", section 12 "Condition-driven adjustments".
@@ -182,9 +188,13 @@ def build_outlook(c, spots, src, today):
     return line, src
 
 
-def render(today, line, src, note=None):
+def render(today, line, src, note=None, season_days=45):
     out = [f"# Fishing outlook — {today}", ""]
     out.append(line)
+    out.append("")
+    # The season block is computed from a table, not read from Drive, so it says
+    # something useful on the days the bot logged nothing at all.
+    out.append(season_alerts.render_markdown(dt.date.fromisoformat(today), season_days))
     out.append("")
     if src:
         out.append(f"Source: **{src['name']}**, modified {src['modifiedTime']}")
@@ -270,6 +280,13 @@ def self_test():
     assert "Not logged:" in line3, line3
     print("  partial log          -> names the fields that are missing  OK")
     print(f"     {line3}")
+
+    body = render("2026-09-06", line1, None)
+    assert "Season alerts" in body, body
+    assert "Mullet run" in body, body
+    print("  season block         -> rendered into the summary from the table  OK")
+    assert season_alerts.self_test() == 0
+    print("  season date engine   -> season_alerts self-test passed  OK")
 
     print("\nAll extractor tests passed.")
 

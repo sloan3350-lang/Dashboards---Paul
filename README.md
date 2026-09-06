@@ -7,6 +7,7 @@ folder and writes a short summary to the Chief of Staff folder.
 |---|---|---|
 | `money_summary.py` | Money Machine folder | `money-summary-YYYY-MM-DD.md` |
 | `fishing_outlook.py` | fishing folder | `fishing-outlook-YYYY-MM-DD.md` |
+| `season_alerts.py` | nothing — a table in the file | stdout, and a block inside the fishing outlook |
 
 Both are read-only against your data. They move no money, file nothing, and
 contact no one. Neither one scrapes the web: if a bot did not log a figure,
@@ -38,7 +39,9 @@ standalone script can use. `config.json` expects an OAuth client secret at
 be done once, by hand, on the host machine, because cron cannot answer an
 OAuth consent prompt. After that the refresh token is reused.
 
-**3. The fishing bot has never logged conditions.** This is the significant
+**3. The fishing bot has never logged conditions.** (Softened: the season block
+now carries the summary on days with no conditions, see `season_alerts.py`
+below. The conditions half of the outlook is still blocked as described.) This is the significant
 one. Nothing in Drive records weather, barometric pressure, moon phase,
 sargassum rating or tide. The `Hunting and Fishing` folder holds trip logs
 written after the fact, and the logging protocol in that folder
@@ -125,6 +128,12 @@ base64-embedded, which is why the file is 8 MB.
 
 Tabs: Plan, Conditions, Playbook, Kit, Spots, Rules, **Charters**, Keep?
 
+The Plan tab opens with a **season alert band** — anything opening, closing or
+newly running within 45 days — and the Playbook tab opens with the **season
+clock**, the full forward calendar with where, gear, permits and a countdown per
+season. Both are computed in the file against today's date, so they work
+offline and do not go stale between openings.
+
 The Charters tab covers seat-fare drift and head boats from Riviera Beach to Key
 West — twelve boats, five of them in the Keys (Sailors Choice at Key Largo,
 Miss Islamorada and Captain Michael at Islamorada, Marathon Lady at Vaca Cut,
@@ -134,3 +143,36 @@ review notes, and a comparison table. Marina pins are teal bow triangles on the 
 beach access. Fares and schedules were read on 5 September 2026 and go stale
 fast; the tier badge on each card says whether it came from the operator or from
 an aggregator.
+
+## `season_alerts.py`
+
+What opens, closes or starts running in the next N days, with where to go, what
+gear it needs and which licence or permit it takes. No network, no Drive, no
+credentials — pure date arithmetic against a table in the file, so it runs on a
+machine with nothing configured:
+
+    python3 season_alerts.py                 alerts for the next 45 days
+    python3 season_alerts.py --days 90       a wider horizon
+    python3 season_alerts.py --all           the whole clock, soonest change first
+    python3 season_alerts.py --date 2027-07-01   pretend it is another day
+    python3 season_alerts.py --self-test     the date engine against fixtures
+
+`fishing_outlook.py` renders this block into every daily summary. That matters
+because of blocker 3 above: on a day the fishing bot logged nothing, the
+conditions line still says "no data yet", but the summary is no longer empty —
+the calendar is knowable in advance and needs no bot.
+
+Sixteen seasons. Legal windows (snook, lobster sport and regular, stone crab,
+hogfish, Atlantic shallow-water grouper, greater amberjack, the mutton spawning
+bag reduction, the shore shark permit) were read off FWC pages and news releases
+on 5 September 2026 and are tier B. Bite windows (pompano, blacktip run, mullet
+run, tarpon, mackerel and bluefish, the winter charter season, the Keys reef
+night bite) are pattern rather than law and are tier C.
+
+The lobster sport season is computed from FWC's rule rather than stored as a
+date, so it does not expire: **the last Thursday in July and the Wednesday
+before it.** Anchoring on the last *Wednesday* instead is wrong in any year
+where July 31 is a Wednesday — 2019 ran July 24-25 for that reason, and 2030 is
+the next such year. The self-test pins 2019, 2026, 2027, 2028 and 2030 and
+checks the invariants across fifteen years. The same table and the same rule
+drive the Season clock in `surf-command.html`; change one, change both.
