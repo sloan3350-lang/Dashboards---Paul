@@ -176,3 +176,39 @@ where July 31 is a Wednesday — 2019 ran July 24-25 for that reason, and 2030 i
 the next such year. The self-test pins 2019, 2026, 2027, 2028 and 2030 and
 checks the invariants across fifteen years. The same table and the same rule
 drive the Season clock in `surf-command.html`; change one, change both.
+
+## `dive-command.html`
+
+Snorkel and scuba from Jupiter to Key West, published as an Artifact at
+`claude.ai/code/artifact/433e45a9-da4e-48bc-b010-f574d40ad312`. Sibling of Surf
+Command and deliberately built from its parts: `build_dive.py` lifts the inlined
+Leaflet stylesheet, the app stylesheet, the base64 USGS tile pack and the tide
+table straight out of `surf-command.html` and splices them into `dive_body.html`.
+Edit `dive_body.html`, then:
+
+    python3 build_dive.py     # writes dive-command.html
+
+Never hand-edit `dive-command.html`; it is generated and the tile pack alone is
+7.9 MB of it.
+
+Tabs: Sites, Outfitters, Rules, Research.
+
+**The colour bands are the organising idea.** Green is under a quarter mile from
+shore, amber a quarter to a half, navy beyond — the distance is stored per site
+with its provenance and the band derives from it, so a card always says whether
+the figure was published or computed from an approximate plotted position.
+Cards also carry certification needed against an Open Water card, depth, fees,
+parking, dog rules, hours, hazards, sanctuary rules, review themes, address,
+phone and a source link. Outfitters are boat operators only; a shop that sells
+gear and fills tanks but runs no boat is not on the page.
+
+The Sites tab computes the next four high slacks at NOAA station 8722670, Lake
+Worth Pier, from the tide table baked into Surf Command — Blue Heron Bridge is
+unfishable and unenjoyable on the wrong tide, and that is the number that
+decides the trip.
+
+Research intake lives in Google Drive at **My Drive → Dive Command**, with
+`00 — INBOX for Grok`, `01 — Verified` and `02 — Reference and conflicts`. The
+intake spec in the inbox names every field the page renders. The Research tab
+lists what is still missing, which is mostly charter pricing and itemised rental
+costs.
