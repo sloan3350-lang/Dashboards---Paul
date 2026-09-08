@@ -1,0 +1,888 @@
+<meta charset="utf-8">
+<title>Dive Command</title>
+{{LEAFLET_CSS}}
+{{APP_CSS}}
+<style>
+/* Dive Command additions on top of the Surf Command sheet. The three distance
+   bands are the organising idea of the page, so they get their own tokens. */
+:root{--near:#3FA95F;--mid:#E0A32B;--far:#2F5FD0;--shop:#2ED3C6}
+.pin.far{background:var(--far)!important}
+.pin.shop{width:0;height:0;border:0;border-radius:0;background:none!important;box-shadow:none;
+ border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:13px solid var(--shop);
+ filter:drop-shadow(0 1px 4px rgba(0,0,0,.75)) drop-shadow(0 0 1.5px rgba(242,234,218,.95))}
+.legend i.tri{width:0;height:0;border-radius:0;background:none!important;
+ border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid var(--shop)}
+.band{flex:0 0 auto;font:700 9.5px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;padding:5px 8px;
+ border-radius:5px;text-transform:uppercase;white-space:nowrap}
+.band.near{background:rgba(63,169,95,.2);color:#7DD79A}
+.band.mid{background:rgba(224,163,43,.2);color:#EDC168}
+.band.far{background:rgba(47,95,208,.28);color:#9DB6F2}
+.cert{font:700 9px/1 ui-monospace,Menlo,monospace;letter-spacing:.09em;padding:4px 7px;border-radius:4px;border:1px solid}
+.cert.c0{color:#7DD79A;border-color:rgba(63,169,95,.55)}
+.cert.c1{color:#8CC0E6;border-color:rgba(75,159,214,.55)}
+.cert.c2{color:#EDC168;border-color:rgba(224,163,43,.55)}
+.cert.c3{color:#EF9187;border-color:rgba(207,74,61,.55)}
+.stars{font:700 12px/1 ui-monospace,Menlo,monospace;color:#EFCB84}
+.tidecard{border:1px solid var(--line2);border-radius:11px;background:var(--panel);padding:13px 14px;margin:11px 0}
+.tiderow{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;margin-top:7px}
+.tiderow b{color:#D6E8F0;font-family:ui-monospace,Menlo,monospace}
+</style>
+
+<header>
+  <div class="kick"><span>Dive Command &middot; Jupiter &rarr; Key West</span><span id="now"></span></div>
+  <h1>SE Florida Snorkel &amp; Scuba <em>/ from Sunrise</em></h1>
+  <div class="hdrline">
+    <span><b id="nearct">&mdash;</b> of <b id="totct">&mdash;</b> reachable from shore</span>
+    <span id="tidemini">&mdash;</span>
+    <span id="certmini">&mdash;</span>
+  </div>
+</header>
+
+<div class="tabs" id="tabs">
+  <button class="chip" data-t="sites" aria-pressed="true">Sites</button>
+  <button class="chip" data-t="shops" aria-pressed="false">&#9875; Outfitters</button>
+  <button class="chip" data-t="rules" aria-pressed="false">Rules</button>
+  <button class="chip" data-t="gaps" aria-pressed="false">Research</button>
+</div>
+
+<div class="split">
+<div class="mapcol">
+<div class="mapbar">
+  <div id="maptoggle" class="segbtn">
+    <button data-m="sharp" aria-pressed="true">Sharp</button>
+    <button data-m="offline" aria-pressed="false">Offline</button>
+  </div>
+  <select id="zoomspot" aria-label="Zoom to a site"><option value="-1">Zoom to a site&hellip;</option></select>
+  <div id="regionjump" class="segbtn">
+    <button data-r="mainland" aria-pressed="true">Home</button>
+    <button data-r="keys" aria-pressed="false">Keys</button>
+  </div>
+</div>
+<p class="mapnote" id="mapnote">Published copy: the sharp Esri layer is blocked by the artifact sandbox, so this opens on the baked USGS pack. That pack covers the whole Jupiter&ndash;Key West span at overview zoom and only the Broward beaches in close. Open the file locally for sharp imagery.</p>
+<p class="imgdate" id="imgdate"></p>
+<div id="map"></div>
+<div class="legend">
+  <span><i style="background:#3FA95F"></i>Under &frac14; mile from shore</span>
+  <span><i style="background:#E0A32B"></i>&frac14; to &frac12; mile</span>
+  <span><i style="background:#2F5FD0"></i>Over &frac12; mile &mdash; boat</span>
+  <span><i class="tri"></i>Outfitter</span>
+</div>
+</div>
+
+<main><div class="wrap">
+
+<!-- ===== SITES ===== -->
+<div id="pane-sites" class="pane on">
+  <div class="tidecard" id="tidecard">
+    <h3>High slack &mdash; the number that decides a Blue Heron Bridge trip</h3>
+    <div class="zsub" id="tidesub"></div>
+    <div class="tiderow" id="tiderow"></div>
+    <p class="why" style="margin-top:9px">Enter about 30 minutes before high slack and you get clean Atlantic water
+    pushing in through the inlet. Enter on the outgoing and you get Lake Worth Lagoon, which is green soup with
+    current in it. The tide table below is baked into this file from the Lake Worth Pier station, so it needs no
+    network, and it runs out at the date shown.</p>
+  </div>
+
+  <div class="tabs" id="filters" style="border:0;background:transparent;padding:10px 0 0;margin:0 -4px">
+    <button class="chip" data-f="all" aria-pressed="true">All</button>
+    <button class="chip" data-f="shore" aria-pressed="false">Shore entry</button>
+    <button class="chip" data-f="near" aria-pressed="false">Under &frac14; mi</button>
+    <button class="chip" data-f="snorkel" aria-pressed="false">Snorkel</button>
+    <button class="chip" data-f="ow" aria-pressed="false">Open Water OK</button>
+    <button class="chip" data-f="adv" aria-pressed="false">Advanced only</button>
+    <button class="chip" data-f="free" aria-pressed="false">Free entry</button>
+    <button class="chip" data-f="dogs" aria-pressed="false">Dogs OK</button>
+    <button class="chip" data-f="wreck" aria-pressed="false">Wrecks</button>
+    <button class="chip" data-f="mainland" aria-pressed="false">Broward &amp; PBC</button>
+    <button class="chip" data-f="dade" aria-pressed="false">Miami-Dade</button>
+    <button class="chip" data-f="keys" aria-pressed="false">The Keys</button>
+  </div>
+  <div class="count" id="count"></div>
+  <ul id="list"></ul>
+</div>
+
+<!-- ===== OUTFITTERS ===== -->
+<div id="pane-shops" class="pane">
+  <h2 style="margin-top:14px">&#9875; Outfitters that run boats</h2>
+  <p style="font-size:13px;color:var(--fg2)">Operators that put you on the water, not shops that sell gear and fill
+  tanks. Everything past the second reef and every wreck on this page needs one of these. Where a price is missing
+  it is because the operator does not publish it on a page I could reach, and inventing a number would be worse
+  than an empty field &mdash; those rows say <b>call</b> and are on the research list.</p>
+  <div class="count" id="shopcount"></div>
+  <div id="shoplist"></div>
+</div>
+
+<!-- ===== RULES ===== -->
+<div id="pane-rules" class="pane">
+  <h2 style="margin-top:14px">The divers-down flag, which is state law and not etiquette</h2>
+  <p>Florida Statute 327.331 requires a divers-down flag or buoy prominently displayed in the area you are diving,
+  except when you are in an area customarily used for swimming only. <b>A flag flown from a buoy or float towed by
+  the diver must be at least 12 by 12 inches; one flown from a vessel or structure must be at least 20 by 24
+  inches.</b> The flag is red with a white diagonal stripe from the top staff-side corner to the opposite lower
+  corner, and the stripe must be 25 percent of the flag's height.</p>
+  <p>Vessels other than law enforcement or rescue must slow to headway speed within <b>100 feet</b> of a flag on a
+  river, inlet or navigation channel, and within <b>300 feet</b> on any other water. Violation is a noncriminal
+  infraction under s. 327.73. <b>Statute text read directly.</b></p>
+  <div class="callout"><b>What that means at Blue Heron Bridge.</b> You are diving inside a marked navigation
+  channel basin with boat traffic on both sides of the span. The flag is not optional there, the 100-foot rule is
+  the one that applies, and a towed float is the practical answer because you move a long way underwater on a
+  single dive.</div>
+
+  <h2>The sanctuary, and what it forbids</h2>
+  <p>The Florida Keys National Marine Sanctuary covers the whole chain. <b>Spearfishing is prohibited within the
+  sanctuary.</b> Anchoring on living coral is prohibited anywhere in it. There are <b>17 Sanctuary Preservation
+  Areas</b> covering about 12 square miles, placed on the reefs people actually visit &mdash; Molasses, Key Largo
+  Dry Rocks, Alligator, Sombrero, Looe Key and the rest. <b>Diving and snorkelling are allowed inside an SPA;
+  fishing and collecting are not.</b> Anchoring inside an SPA when a mooring buoy is available is prohibited.</p>
+  <p>The sanctuary maintains more than <b>600 mooring buoys</b>, free and first-come. If you are on a charter the
+  crew handles this; if you ever run your own boat out there, the buoy is the only legal way to sit on most of
+  these sites.</p>
+  <div class="callout bad"><b>Do not touch the coral.</b> Taking or damaging coral or live rock is prohibited
+  sanctuary-wide, and that includes standing on it, resting a knee on it and steadying yourself with a hand.
+  Buoyancy is a legal issue here, not just a skill issue.</div>
+
+  <h2>Spearfishing outside the sanctuary</h2>
+  <p>Spearfishing is prohibited in Monroe County <b>from Long Key north to the Dade County line</b>, and everywhere
+  within 100 yards of a public swimming beach, a public fishing pier, or a bridge from which fishing is permitted.
+  It is banned outright in all Florida state parks and in Everglades and Dry Tortugas. Between the sanctuary ban
+  and those buffers, there is effectively nowhere on this page where you may spear.</p>
+
+  <h2>The licence trap</h2>
+  <div class="callout bad"><b>Your free resident shoreline licence does not cover you in the water.</b> It covers
+  fishing from shore, a pier or a bridge you walked onto. It expressly does not cover swimming or diving, so it
+  does not cover taking lobster on a dive, and it does not cover spearfishing. That needs the full saltwater
+  licence, plus the lobster permit for lobster. Same trap the Surf Command Rules tab flags for the Keys bridges.</div>
+
+  <h2>Certification, honestly</h2>
+  <p>You are Open Water. That is the card for everything on this page down to about 60 feet, which includes every
+  shore site, the whole first and second reef, the Benwood at 25 to 45 feet, Cannon Beach, Sombrero, Looe Key and
+  Alligator. It is <b>not</b> the card for the wrecks that make the Keys famous. Operators enforce this at the
+  dock, and they are not negotiating:</p>
+  <table>
+    <tr><th>Wreck</th><th>Depth</th><th>What the operator requires</th></tr>
+    <tr><td><b>Spiegel Grove</b>, Key Largo</td><td>~65 ft to 130 ft at the sand</td><td>Advanced Open Water recommended by every operator; some require it outright</td></tr>
+    <tr><td><b>USCGC Duane</b>, Key Largo</td><td>Upright in ~120 ft</td><td>Advanced Open Water minimum</td></tr>
+    <tr><td><b>USCGC Bibb</b>, Key Largo</td><td>On her side in ~130 ft</td><td>Advanced Open Water minimum</td></tr>
+    <tr><td><b>The Eagle</b>, Islamorada</td><td>On her side, max ~110 ft</td><td>Advanced plus recent diving experience</td></tr>
+    <tr><td><b>Thunderbolt</b>, Marathon</td><td>Upright, ~115&ndash;120 ft</td><td>Advanced advised</td></tr>
+    <tr><td><b>Adolphus Busch Sr.</b>, Looe Key</td><td>~110 ft, deck at 80&ndash;100</td><td>Advanced</td></tr>
+    <tr><td><b>USNS Vandenberg</b>, Key West</td><td>~140 ft, superstructure at 95&ndash;100</td><td>Advanced <b>and</b> proof of a deep dive to at least 60 ft within the past year</td></tr>
+    <tr><td><b>Benwood</b>, Key Largo</td><td>Stern at 27 ft, bow at ~52 ft</td><td>Open Water &mdash; the one famous Keys wreck your card already covers</td></tr>
+  </table>
+  <div class="callout good"><b>The move, if you want the deep wrecks.</b> Advanced Open Water is two days and five
+  dives, one of which is the deep dive that the Vandenberg operators want documented anyway. Every outfitter on the
+  Outfitters tab teaches it. Do it in Key Largo on a trip where the training dives are on the wrecks you want to
+  come back to, rather than in a quarry, and the course pays for itself in access.</div>
+</div>
+
+<!-- ===== RESEARCH ===== -->
+<div id="pane-gaps" class="pane">
+  <h2 style="margin-top:14px">What is verified, what is not, and where to send more</h2>
+  <p>Same tier convention as Surf Command. <b>Tier B</b> means read off the operator's, park's or agency's own page.
+  <b>Tier C</b> means an aggregator, a review site or a dive-media article and not confirmed at the source. Every
+  card carries its tier. Nothing here is Tier A, because Tier A would mean I stood on the beach.</p>
+
+  <div class="callout"><b>The Drive folder is live.</b> <span class="mono">My Drive &rarr; Dive Command</span>, with
+  three subfolders: <b>00 &mdash; INBOX for Grok</b>, <b>01 &mdash; Verified</b>, <b>02 &mdash; Reference and
+  conflicts</b>. The intake spec sits in the inbox as <span class="mono">READ ME &mdash; what to collect and the
+  exact format</span> and names every field this page renders. Anything dropped there gets read, cross-checked
+  against what is already here, and either merged or filed as a conflict.</div>
+
+  <h3>The gaps, in the order they hurt</h3>
+  <table>
+    <tr><th>Gap</th><th>Why it matters</th></tr>
+    <tr><td><b>Charter prices, nearly across the board</b></td><td>Most operators publish rates behind a booking widget that a text fetch cannot read. Trip times I have; the two-tank price and, more importantly, <b>what is included versus rented</b> is the number that decides which boat is actually cheapest.</td></tr>
+    <tr><td><b>Rental costs, itemised</b></td><td>Tanks and weights are usually included and everything else is not. A $95 two-tank charter with $60 of rental behind it is not a $95 charter.</td></tr>
+    <tr><td><b>Star ratings with counts and dates</b></td><td>I have review counts for a few operators and themes for most. A rating with no count and no date is close to meaningless, so the cards carry counts where I have them and say nothing where I do not.</td></tr>
+    <tr><td><b>Exact site coordinates</b></td><td>Shore sites are accurate. Offshore sites are plotted from published approximate positions, which is why every offshore card says the distance is computed and approximate. A wrong coordinate can flip a colour band.</td></tr>
+    <tr><td><b>Dog rules at county and city parks</b></td><td>State parks are consistent and documented. Municipal parks are not, and the aggregators get them wrong constantly.</td></tr>
+    <tr><td><b>Nitrox surcharges and course pricing</b></td><td>Relevant the moment you go for Advanced.</td></tr>
+  </table>
+
+  <h3>Known but not yet on the page</h3>
+  <p>Operators and sites I have a name for and not enough verified detail to publish a card: Lost Reef Adventures,
+  Southpoint Divers and Captain's Corner in Key West; Islamorada Dive Center and Key Dives in Islamorada;
+  Tilden's Scuba Center in Marathon; Looe Key Reef Resort on Ramrod Key; Horizon Divers, Quiescence and Ocean
+  Divers in Key Largo; Tarpoon Lagoon and Squalo Divers in Miami; Lauderdale Diver and Gold Coast Scuba in Broward.
+  Also the Biscayne National Park Maritime Heritage Trail, the SS Copenhagen preserve off Pompano, and the Broward
+  deep wrecks including the Captain Dan. Each needs the intake fields before it earns a card.</p>
+
+  <h3>How this page treats a conflict</h3>
+  <p>If two sources disagree on a fee, an hour or a depth, the card says so rather than picking one. That already
+  happened once here: Fort Zachary Taylor's entry fee is quoted as $7 for two people in a vehicle by one source and
+  in the standard state-park structure of $8 per vehicle by another, and the card carries both.</p>
+</div>
+
+<footer>
+  <p>Dive Command &mdash; sibling of Surf Command. Built 7 September 2026. Sites, fees, hours and operator schedules
+  were read that day and change without notice; call before you drive. Distances are to the nearest shore, computed
+  in the file from the plotted position, and offshore positions are approximate. Nothing here is a substitute for a
+  briefing from the crew running the boat, or for your own judgement about a dive you are not trained for.</p>
+</footer>
+
+</div></main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+{{TILES}}
+{{TIDES}}
+const HOME=[26.1554,-80.3020];
+
+/* ===== sites =====
+   dist: miles from the nearest shore. Where a published figure exists it is
+   used and distsrc says so; otherwise it is computed from the plotted position
+   and is approximate, which is stated on the card. Band thresholds are the
+   ones asked for: green under a quarter mile, amber to a half, navy beyond.
+   cert: 0 snorkel, 1 Open Water, 2 Advanced, 3 Advanced plus documented deep. */
+const SITES=[
+{n:"Blue Heron Bridge — Phil Foster Park",area:"Riviera Beach",region:"mainland",tier:"B",
+ lat:26.78380,lng:-80.04330,dist:0.02,distsrc:"shore entry — you walk in from the beach",
+ type:"both",cert:1,shore:true,depth:"6 to just over 20 ft",wreck:false,free:true,dogs:"limited",
+ addr:"900 E Blue Heron Blvd, Riviera Beach, FL 33404",tel:"561-966-6600",
+ hours:"Beach sunrise to sunset. <b>Diving outside those hours requires a county permit.</b> Fishing pier to 10 p.m.; boat ramp 24 hours on a $10 daily permit.",
+ fees:"<b>Free.</b> No admission, no parking charge.",
+ park:"Free lot, and it fills early on any weekend and on any good-visibility weekday. Arrive well before slack or park at the far end and walk.",
+ dogtxt:"Leashed pets permitted in the park.",
+ tide:"high",
+ cond:"<b>Tide is everything.</b> Enter about 30 minutes before high slack for clean Atlantic water pushed in through the Lake Worth Inlet. On the outgoing you are diving lagoon water with current in it. Maximum depth just over 20 ft, so bottom time is 45 minutes to two hours.",
+ haz:"Active navigation channel on both sides of the span, current outside the slack window, and boat traffic that does not always respect the flag. Tow a float.",
+ rules:"Divers-down flag required — this is a navigation channel, so the 100-foot rule applies. Snorkel trail is marked. No spearfishing.",
+ rev:"The most reviewed dive site in the state and the consistent complaint is not the site, it is the crowd and the visibility on a badly timed tide. Reviewers who time slack call it a paradise; reviewers who turn up at random call it murky. Both are describing the same water at different hours.",
+ note:"Widely called the best shore dive in North America, and it is a muck dive rather than a reef dive — seahorses, octopus, batfish, juveniles. Snorkelers get the same show in 8 to 12 ft on the trail.",
+ src:"https://www.puravidadivers.com/dive-blue-heron-bridge-phil-foster-park/",srcname:"Pura Vida Divers site guide + PBC Parks"},
+
+{n:"Coral Cove Park",area:"Tequesta",region:"mainland",tier:"C",
+ lat:26.94690,lng:-80.07830,dist:0.02,distsrc:"shore entry — limestone ledge starts at the waterline",
+ type:"snorkel",cert:0,shore:true,depth:"3 to 15 ft",wreck:false,free:true,dogs:"no",
+ addr:"19450 Beach Rd, Tequesta, FL 33469",tel:"561-966-6600",
+ hours:"Sunrise to sunset, Palm Beach County park.",
+ fees:"<b>Free.</b> Free lot.",
+ park:"Free county lot across Beach Road; small, and it fills on weekends.",
+ dogtxt:"Dogs are not permitted on Palm Beach County ocean beaches.",
+ tide:"high",
+ cond:"Natural limestone outcrops right off the sand hold the fish. Best on a calm day at high tide with an east wind under 10; any swell and the rock turns the water to milk.",
+ haz:"You are snorkelling over rock, not sand. Entry and exit in any surf will cut you up. Sea urchins in the crevices.",
+ rules:"Dive flag required. County park rules; no collecting.",
+ rev:"Reviewers consistently rate it the best beach snorkel in northern Palm Beach County and consistently warn that it is only good when the ocean is flat. Parking is the second complaint.",
+ note:"The northern anchor of this page and the easiest true snorkel site above Broward. Forty-five minutes from Sunrise on a good run.",
+ src:"https://discover.pbc.gov/parks/Locations/",srcname:"PBC Parks listing + review aggregate"},
+
+{n:"Peanut Island lagoon",area:"Riviera Beach",region:"mainland",tier:"C",
+ lat:26.77420,lng:-80.04300,dist:0.30,distsrc:"computed from the Riviera Beach Marina shuttle dock — approximate",
+ type:"snorkel",cert:0,shore:false,depth:"3 to 12 ft in the lagoon",wreck:false,free:false,dogs:"unknown",
+ addr:"Peanut Island Park, 6500 Peanut Island Rd, Riviera Beach, FL 33404",tel:"561-966-6600",
+ hours:"Daylight. Shuttle operators set their own last run — confirm before you go across.",
+ fees:"Shuttle or water taxi fare; no park admission for day use.",
+ park:"Park at the marina or Phil Foster and take the shuttle. There is no bridge.",
+ dogtxt:"Not confirmed. Treat as prohibited until verified.",
+ tide:"high",
+ cond:"Sheltered man-made lagoon with a rock rim; tropicals, rays, small sharks, and manatees in winter. Calmer than the bridge and better for a first snorkel.",
+ haz:"<b>Do not swim the channel to reach it.</b> That is the Lake Worth Inlet cut with ship traffic. Shuttle or kayak only.",
+ rules:"Dive flag required outside the swim area.",
+ rev:"Reviewed well as a family snorkel and a camping spot; the complaints are about shuttle logistics and crowding on weekends.",
+ note:"The band on this card is honest but misleading — it is a third of a mile of water you may not swim. Treat it as boat access.",
+ src:"https://discover.pbc.gov/parks/Locations/",srcname:"PBC Parks + review aggregate"},
+
+{n:"Breakers Reef",area:"Palm Beach",region:"mainland",tier:"C",
+ lat:26.71000,lng:-80.02500,dist:0.75,distsrc:"computed from the Palm Beach shoreline — approximate",
+ type:"scuba",cert:1,shore:false,depth:"45 to 80 ft",wreck:false,free:false,dogs:"n/a",
+ addr:"Boat access — most operators leave from the Riviera Beach or Palm Beach Inlet marinas",tel:"",
+ hours:"Operator schedules; most run a morning two-tank.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"<b>Drift dive.</b> The Gulf Stream runs close in off Palm Beach and the boat follows your bubbles; you do not fight the current, you ride it. Ledges and swim-throughs, big fish, turtles.",
+ haz:"Current is the whole character of the dive. An SMB is standard and most operators require one.",
+ rules:"Boat flies the flag. Follow the divemaster's live-boat procedure.",
+ rev:"The signature Palm Beach dive and the reason the county has a dive industry. Reviews are consistently strong; the caveat in nearly all of them is that a drift dive is not a beginner's first ocean dive.",
+ note:"Your card covers this. It is the single best argument for driving an hour north instead of diving Broward.",
+ src:"https://www.puravidadivers.com/",srcname:"Operator site listings"},
+
+{n:"Jupiter wreck trek — Esso Bonaire III, Zion Train, MG-111",area:"Jupiter",region:"mainland",tier:"C",
+ lat:26.93500,lng:-80.01000,dist:3.90,distsrc:"computed from the Jupiter shoreline — approximate",
+ type:"scuba",cert:2,shore:false,depth:"70 to 95 ft",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat access from Jupiter Inlet — Jupiter Dive Center is the main operator",tel:"561-745-7807",
+ hours:"Charters at 9 a.m. daily, plus 1:30 p.m. on weekends.",
+ fees:"Charter fare — not published on a page I could reach. Call.",
+ park:"At the dive centre.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"Deep drift over three sunk hulls. <b>Goliath grouper aggregate here to spawn from August into September</b>, and divers report upwards of sixty fish on a single wreck at the peak.",
+ haz:"Depth plus current. This is the site where an Open Water card runs out — the goliath season dives sit at 80 to 95 ft.",
+ rules:"Goliath grouper are catch-and-release statewide; you are there to look. Boat flies the flag.",
+ rev:"The goliath aggregation is the most photographed dive in South Florida and the reviews reflect it. The recurring caution is that it is a deep drift and the operators screen for experience.",
+ note:"<b>Time-critical.</b> If you want the goliath spawn, it is August and September, and that is also when the boats book out.",
+ src:"https://jupiterdivecenter.com/the-four-seasons-of-jupiter-diving/goliath-groupers/",srcname:"Jupiter Dive Center"},
+
+{n:"Datura Avenue — Anglin's Pier reef and snorkel trail",area:"Lauderdale-by-the-Sea",region:"mainland",tier:"B",
+ lat:26.19170,lng:-80.09300,dist:0.02,distsrc:"published — first reef about 100 feet off the sand",
+ type:"both",cert:1,shore:true,depth:"10 to 18 ft on the trail, three reef lines beyond",wreck:false,free:false,dogs:"no",
+ addr:"Datura Ave at El Mar Dr, Lauderdale-by-the-Sea, FL 33308",tel:"954-640-4200",
+ hours:"Beach open 24 hours; the town's fishing restriction does not apply to divers.",
+ fees:"No entry fee. <b>Metered street parking</b> on Datura, El Mar and Commercial.",
+ park:"Metered. There is a <b>tank rack at the Datura beach portal</b> for gear staging, which tells you how seriously this town takes shore diving.",
+ dogtxt:"Dogs are not permitted on the town beach.",
+ tide:"any",
+ cond:"<b>The closest reef to shore in the continental United States.</b> First reef about 100 feet out in 10 to 15 ft, second and third beyond it. A five-minute finned swim to the trail. Visibility is the variable — it goes to nothing after a blow or on a strong onshore wind.",
+ haz:"Boat traffic beyond the second reef; surge on the rock in any swell; and the swim back is the part people underestimate on an outgoing.",
+ rules:"<b>No diving within 300 feet of Anglin's Pier.</b> Divers-down flag required. Nothing may be taken from the snorkel trail.",
+ rev:"The town markets itself as Florida's beach diving capital and the reviews back it — the consistent praise is genuine reef within a swim of the sand, and the consistent complaint is visibility on a bad-wind day and metered parking.",
+ note:"This is your default. Nineteen miles from Sunrise, no boat, no fee beyond the meter, and a real reef.",
+ src:"https://www.lauderdalebythesea-fl.gov/374/Snorkeling-Scuba-Diving",srcname:"Town of Lauderdale-by-the-Sea"},
+
+{n:"SS Copenhagen — State Underwater Archaeological Preserve",area:"Pompano Beach",region:"mainland",tier:"C",
+ lat:26.24720,lng:-80.07200,dist:0.75,distsrc:"published as roughly three quarters of a mile offshore",
+ type:"both",cert:1,shore:false,depth:"15 to 31 ft",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat access off Pompano Beach; Broward operators run it as a shallow second dive",tel:"",
+ hours:"Operator schedules.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"An 1898 steamer on the reef line in shallow water, which makes it one of the few wrecks a <b>snorkeler</b> can actually see. Bright, broken up, full of fish.",
+ haz:"Shallow means surge. On a swell it is unpleasant and the visibility drops fast.",
+ rules:"<b>State Underwater Archaeological Preserve — take nothing.</b> Artifacts are protected by law.",
+ rev:"Consistently described as the best shallow wreck in Broward and the best value second tank on a two-tank trip.",
+ note:"On the research list: exact position, which operators run it and at what price.",
+ src:"https://museumsinthesea.com/copenhagen/",srcname:"Florida preserve programme — needs confirmation"},
+
+{n:"Neptune Memorial Reef",area:"Key Biscayne",region:"dade",tier:"C",
+ lat:25.68570,lng:-80.09000,dist:3.25,distsrc:"published as about 3.25 miles east of Key Biscayne",
+ type:"scuba",cert:1,shore:false,depth:"40 ft",wreck:false,free:false,dogs:"n/a",
+ addr:"Boat access from Key Biscayne and Miami operators",tel:"",
+ hours:"Operator schedules; several Miami shops run it as a scheduled monthly trip.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"A cremation memorial built as an artificial reef — columns, gates and lions across more than 600,000 square feet at a flat 40 feet. Easy depth, unusual scenery, good fish life on the structure.",
+ haz:"Current can run. Visibility is Miami visibility, which is variable.",
+ rules:"It is a memorial. Behave accordingly, and take nothing.",
+ rev:"Divers either love the strangeness of it or find it kitsch; nobody argues about the marine life, which is genuinely good on the structure.",
+ note:"Well inside your certification and the most interesting thing to dive in Miami-Dade.",
+ src:"https://www.neptunememorialreef.com/",srcname:"Reef site + Miami operator schedules"},
+
+{n:"Cannon Beach — John Pennekamp",area:"Key Largo",region:"keys",tier:"B",
+ lat:25.12400,lng:-80.40300,dist:0.02,distsrc:"published — Spanish shipwreck artifacts about 100 feet offshore",
+ type:"snorkel",cert:0,shore:true,depth:"3 to 10 ft",wreck:true,free:false,dogs:"no",
+ addr:"102601 Overseas Hwy (MM 102.5), Key Largo, FL 33037",tel:"305-451-6300",
+ hours:"<b>8 a.m. to sunset, 365 days.</b> Buildings and concession 8 to 5.",
+ fees:"<b>$8 per vehicle</b> of two to eight people plus 50 cents per person; <b>$4.50</b> single-occupant vehicle; <b>$2.50</b> pedestrian or cyclist.",
+ park:"Inside the park, included in entry. Fills in season and on holiday weekends.",
+ dogtxt:"<b>Pets are not allowed on the beaches</b>, on tour or rental boats, or in buildings. Leashed only where permitted. Service dogs welcome throughout.",
+ tide:"any",
+ cond:"The park's main snorkel beach. Replica cannon and ballast stones from an early Spanish wreck lie about 100 feet out in shallow water, with patch reef around them.",
+ haz:"Shallow and calm. The real hazard is sunburn and the walk back over hot sand.",
+ rules:"State park — take nothing, including sand dollars. No pets on the beach.",
+ rev:"Reviewers rate the park highly overall; the specific complaint about Cannon Beach is that it is not the reef, and people who booked expecting Molasses are disappointed. It is a shore snorkel, and a good one.",
+ note:"<b>The best shore-entry snorkel in the Keys</b> and the reason to stop at MM 102 on the way south. The real reef here is the boat trip below.",
+ src:"https://www.floridastateparks.org/parks-and-trails/john-pennekamp-coral-reef-state-park/hours-fees",srcname:"Florida State Parks hours and fees"},
+
+{n:"Christ of the Abyss — Key Largo Dry Rocks",area:"Key Largo",region:"keys",tier:"B",
+ lat:25.12300,lng:-80.29800,dist:5.30,distsrc:"computed from the Key Largo shoreline — approximate",
+ type:"both",cert:0,shore:false,depth:"6 to 25 ft",wreck:false,free:false,dogs:"n/a",
+ addr:"Boat from John Pennekamp Coral Reef State Park, MM 102.5",tel:"305-451-6300",
+ hours:"Park concession runs snorkel tours; a 2.5-hour round trip with about 1.5 hours in the water.",
+ fees:"Park entry plus the tour fare.",
+ park:"Inside the park.",
+ dogtxt:"<b>Pets are not allowed on tour boats.</b>",
+ tide:"any",
+ cond:"The bronze Christ statue in 25 feet on a shallow patch reef, and the single most recognisable snorkel in Florida. Shallow enough that snorkelers see it properly rather than as a shape below them.",
+ haz:"Crowded. Boat traffic. Current on a running tide.",
+ rules:"<b>Sanctuary Preservation Area</b> — diving and snorkelling allowed, fishing and collecting are not. Mooring buoys only, no anchoring.",
+ rev:"The most photographed site in the Keys, and reviews split on the crowd rather than the site. Go on the first boat of the day.",
+ note:"Snorkel-only is fine here; the statue sits in 25 ft and the reef around it is shallower.",
+ src:"https://pennekamppark.com/",srcname:"Coral Reef Park Company"},
+
+{n:"Molasses Reef",area:"Key Largo",region:"keys",tier:"B",
+ lat:25.01000,lng:-80.37600,dist:5.80,distsrc:"computed from the Key Largo shoreline — approximate",
+ type:"both",cert:1,shore:false,depth:"10 to 40 ft",wreck:false,free:false,dogs:"n/a",
+ addr:"Boat from Key Largo operators",tel:"",
+ hours:"Operator schedules; the standard morning two-tank.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"The busiest reef in the Keys for a reason: spur and groove coral in clear shallow water, big schools, and it works for snorkelers and divers on the same boat.",
+ haz:"Current and heavy boat traffic. Stay with the flag.",
+ rules:"<b>Sanctuary Preservation Area.</b> Mooring buoys, no anchoring, no fishing, no collecting, no touching the coral.",
+ rev:"Universally well reviewed and universally described as busy. Conditions complaints are about current and surge on a windy day.",
+ note:"Well within your card and the reef most Key Largo two-tank trips visit.",
+ src:"https://floridakeys.noaa.gov/zones/spas/",srcname:"FKNMS Sanctuary Preservation Areas"},
+
+{n:"Benwood wreck",area:"Key Largo",region:"keys",tier:"B",
+ lat:25.06000,lng:-80.34000,dist:5.10,distsrc:"computed from the Key Largo shoreline — approximate",
+ type:"scuba",cert:1,shore:false,depth:"stern at 27 ft, bow and anchor at ~52 ft",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat from Key Largo operators",tel:"",
+ hours:"Operator schedules.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"A 1942 casualty broken across the bottom and grown into reef. Shallow, bright, and loaded with fish.",
+ haz:"Sharp structure. Standard wreck caution, but no penetration required or advised.",
+ rules:"Sanctuary rules. Take nothing.",
+ rev:"Consistently described as the friendliest wreck in the Keys and the one to dive before the deep ones.",
+ note:"<b>The one famous Keys wreck your Open Water card already covers</b> — operators state Open Water as the requirement for it, against Advanced for the Spiegel, Duane and Bibb.",
+ src:"https://keylargodivecenter.com/policies/",srcname:"Key Largo operator certification policy"},
+
+{n:"USS Spiegel Grove",area:"Key Largo",region:"keys",tier:"B",
+ lat:25.06700,lng:-80.30100,dist:6.10,distsrc:"computed from the Key Largo shoreline — approximate",
+ type:"scuba",cert:2,shore:false,depth:"~65 ft at the shallowest structure to 130 ft at the sand",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat from Key Largo operators",tel:"",
+ hours:"Operator schedules; usually the first tank of a morning trip.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"510 feet of landing ship dock, the largest wreck sunk for divers when she went down. Huge, current-swept, and you see a fraction of her per dive.",
+ haz:"Depth, current and the temptation to go deeper than planned. Nitrox is the sensible answer.",
+ rules:"Sanctuary rules. No penetration without wreck training.",
+ rev:"The marquee Keys wreck. Reviews are unanimous on the scale and consistent about the current.",
+ note:"<b>Advanced Open Water is what operators want here.</b> Some recommend, some require; assume required and you will never be turned away at the dock.",
+ src:"https://www.scubadiving.com/are-you-ready-dive-key-largos-spiegel-grove",srcname:"Scuba Diving magazine + operator policies"},
+
+{n:"USCGC Duane",area:"Key Largo",region:"keys",tier:"B",
+ lat:24.99000,lng:-80.38000,dist:6.40,distsrc:"computed from the Key Largo shoreline — approximate",
+ type:"scuba",cert:2,shore:false,depth:"upright in ~120 ft",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat from Key Largo operators",tel:"",
+ hours:"Operator schedules.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"A 327-foot Coast Guard cutter sitting upright south of Molasses, sunk in 1987. Intact, dramatic, and deep enough that bottom time is short.",
+ haz:"120 feet with current. Short no-decompression limits on air.",
+ rules:"Sanctuary rules. Advanced minimum at every operator I checked.",
+ rev:"Regularly rated among the best wreck dives in North America.",
+ note:"Her sister the <b>Bibb</b> lies on her side in about 130 feet less than a mile away, same requirements.",
+ src:"https://keylargodivecenter.com/policies/",srcname:"Key Largo operator certification policy"},
+
+{n:"Alligator Reef",area:"Islamorada",region:"keys",tier:"B",
+ lat:24.85000,lng:-80.61800,dist:3.90,distsrc:"computed from the Islamorada shoreline — approximate",
+ type:"both",cert:0,shore:false,depth:"8 to 40 ft",wreck:false,free:false,dogs:"n/a",
+ addr:"Boat from Islamorada operators",tel:"",
+ hours:"Operator schedules.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"Shallow spur and groove under the old lighthouse, and one of the best snorkel reefs in the chain because the good coral sits in 10 to 20 feet.",
+ haz:"Current runs hard on the tide. Snorkelers get carried off the mooring.",
+ rules:"<b>Sanctuary Preservation Area.</b> Mooring buoys, no anchoring, no fishing or collecting.",
+ rev:"Consistently rated the best snorkelling in Islamorada.",
+ note:"Snorkel-grade site, so it is the one to book if you are bringing someone who does not dive.",
+ src:"https://floridakeys.noaa.gov/zones/spas/",srcname:"FKNMS Sanctuary Preservation Areas"},
+
+{n:"The Eagle wreck",area:"Islamorada",region:"keys",tier:"B",
+ lat:24.87200,lng:-80.55000,dist:5.60,distsrc:"computed from the Islamorada shoreline — approximate",
+ type:"scuba",cert:2,shore:false,depth:"on her side, 75 ft to a maximum of ~110 ft",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat from Islamorada operators",tel:"",
+ hours:"Operator schedules; usually the deep tank of a morning trip.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"A 287-foot freighter broken in two by Hurricane Georges, lying on her starboard side. The signature Islamorada wreck.",
+ haz:"Depth and current.",
+ rules:"Sanctuary rules. <b>Advanced plus recent diving experience</b> is what operators require.",
+ rev:"Rated the crown jewel of Islamorada diving in the dive press and by the local operators.",
+ note:"On the list for after Advanced.",
+ src:"https://www.padi.com/dive-site/united-states-of-america-usa/the-eagle-shipwreck-75-110ft/",srcname:"PADI dive site record + operator pages"},
+
+{n:"Sombrero Reef",area:"Marathon",region:"keys",tier:"B",
+ lat:24.62700,lng:-81.11000,dist:4.30,distsrc:"computed from the Marathon shoreline — approximate",
+ type:"both",cert:0,shore:false,depth:"5 to 30 ft",wreck:false,free:false,dogs:"n/a",
+ addr:"Boat from Marathon operators",tel:"",
+ hours:"Operator schedules.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"Marathon's showpiece reef under the 142-foot lighthouse. Coral canyons in snorkelling depth with the deeper edge for divers.",
+ haz:"Current on the tide; the mooring field gets busy.",
+ rules:"<b>Sanctuary Preservation Area.</b> Mooring buoys, no anchoring, no fishing or collecting.",
+ rev:"The most consistently praised reef in the middle Keys.",
+ note:"Snorkel and scuba on the same mooring, which makes it the right site for a mixed group.",
+ src:"https://floridakeys.noaa.gov/zones/spas/",srcname:"FKNMS Sanctuary Preservation Areas"},
+
+{n:"Thunderbolt wreck",area:"Marathon",region:"keys",tier:"B",
+ lat:24.61000,lng:-80.94000,dist:4.50,distsrc:"computed from the Marathon shoreline — approximate",
+ type:"scuba",cert:2,shore:false,depth:"upright, ~115 to 120 ft at the sand",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat from Marathon operators — Captain Hook's runs it",tel:"305-743-2444",
+ hours:"Operator schedules.",
+ fees:"Charter fare — not published on a page I could reach. Call.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"A 188-foot cable layer sitting upright and intact with her cable spool still on the bow. The centrepiece of Marathon's dive slate.",
+ haz:"Depth and current; deck at about 75 feet, sand at 120.",
+ rules:"Sanctuary rules. Advanced advised by the operators running it.",
+ rev:"Rated Marathon's best wreck by the dive press and by the local shops.",
+ note:"Pairs naturally with a Marathon trip — and the Marathon Lady sails from the same town if the family wants to fish while you dive.",
+ src:"https://captainhooks.com/thunderbolt-wreck-diving/",srcname:"Captain Hook's wreck page"},
+
+{n:"Calusa Beach — Bahia Honda State Park",area:"Big Pine Key",region:"keys",tier:"B",
+ lat:24.65600,lng:-81.27800,dist:0.03,distsrc:"shore entry — walk in from the beach",
+ type:"snorkel",cert:0,shore:true,depth:"2 to 8 ft",wreck:false,free:false,dogs:"no",
+ addr:"36850 Overseas Hwy (MM 37), Big Pine Key, FL 33043",tel:"305-872-2353",
+ hours:"8 a.m. to sunset, 365 days.",
+ fees:"<b>$8 per vehicle</b> of two to eight; <b>$4.50</b> single occupant; <b>$2.50</b> pedestrian or cyclist.",
+ park:"Inside the park. Fills early in season; the park closes the gate when it is full.",
+ dogtxt:"<b>Pets are not allowed on beaches or in the water</b>, nor in cabins, bathhouses, pavilions or the concession. Leashed only where permitted.",
+ tide:"high",
+ cond:"Sheltered shallow flat with seagrass, small fish and rays. This is a wade-in snorkel, not a reef — the reef here is Looe Key, offshore.",
+ haz:"Current through the Bahia Honda channel is serious. Stay inside the beach area.",
+ rules:"State park — take nothing. Masks and snorkels rentable on site.",
+ rev:"The beach is rated among the best in Florida; snorkelling reviews are mixed precisely because people expect reef and find seagrass flat.",
+ note:"Worth it as the swim stop on a Keys drive, not as the reason for one.",
+ src:"https://www.floridastateparks.org/parks-and-trails/bahia-honda-state-park/experiences-amenities",srcname:"Florida State Parks"},
+
+{n:"Looe Key Reef",area:"Ramrod Key",region:"keys",tier:"B",
+ lat:24.54700,lng:-81.40700,dist:5.20,distsrc:"computed from the Ramrod Key shoreline — approximate",
+ type:"both",cert:0,shore:false,depth:"5 to 35 ft",wreck:false,free:false,dogs:"n/a",
+ addr:"Boat from Ramrod Key and Big Pine operators",tel:"",
+ hours:"Operator schedules.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"The best-developed spur and groove in the lower Keys, in snorkelling depth on the shallow side and 35 feet on the deep. Widely rated the finest reef in the chain.",
+ haz:"Exposed to swell; a windy day shuts it down.",
+ rules:"<b>Sanctuary Preservation Area.</b> Mooring buoys, no anchoring, no fishing or collecting.",
+ rev:"The lower Keys reef everyone names first, and the one the annual underwater music festival is held on.",
+ note:"Snorkel-grade and dive-grade on the same mooring, and within your card.",
+ src:"https://floridakeys.noaa.gov/zones/spas/",srcname:"FKNMS Sanctuary Preservation Areas"},
+
+{n:"Adolphus Busch Sr.",area:"Looe Key",region:"keys",tier:"B",
+ lat:24.51700,lng:-81.44000,dist:6.30,distsrc:"computed from the Ramrod Key shoreline — approximate",
+ type:"scuba",cert:2,shore:false,depth:"deck at 80 to 100 ft, sand at ~110",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat from Ramrod Key and Big Pine operators",tel:"",
+ hours:"Operator schedules.",
+ fees:"Charter fare.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"A 210-foot freighter sunk in 1998, upright and intact near Looe Key. Goliath grouper live on her.",
+ haz:"Depth. Advanced territory.",
+ rules:"Sanctuary rules.",
+ rev:"Well reviewed as the lower Keys wreck; less crowded than the Vandenberg.",
+ note:"Pairs with Looe Key on a two-tank once you have the Advanced card.",
+ src:"https://visitfloridakeys.com/experiences/what-were-famous-for/diving-snorkeling/shipwrecks/adolphus-busch-sr",srcname:"Florida Keys tourism council wreck record"},
+
+{n:"Fort Zachary Taylor",area:"Key West",region:"keys",tier:"C",
+ lat:24.54600,lng:-81.81100,dist:0.03,distsrc:"shore entry — walk in from the beach",
+ type:"snorkel",cert:0,shore:true,depth:"3 to 15 ft",wreck:false,free:false,dogs:"limited",
+ addr:"601 Howard England Way, Key West, FL 33040",tel:"305-292-6713",
+ hours:"8 a.m. to sundown, 365 days.",
+ fees:"<b>Sources conflict.</b> One gives $7 for two in a vehicle plus 50 cents each additional; the standard state-park structure is $8 per vehicle of two to eight plus 50 cents per person. Pedestrian or cyclist $2.50 in both. Verify at the gate.",
+ park:"Inside the park; it fills on cruise-ship days.",
+ dogtxt:"Not confirmed for this park. Florida state parks generally bar pets from beaches and from the water — assume that until verified.",
+ tide:"any",
+ cond:"Rock and rubble bottom off the southern beach with surprisingly good fish life for an urban shore entry. The only real shore snorkel in Key West.",
+ haz:"Rocky entry, boat traffic in the main channel nearby, and current on the tide.",
+ rules:"State park. Dive flag required. Take nothing. Mask, snorkel and fins rentable on site.",
+ rev:"Rated Key West's best beach; snorkel reviews praise the fish and warn about the rocky entry and the current.",
+ note:"Fee and dog rules are the two things to verify here, which is why this card is Tier C.",
+ src:"https://www.floridastateparks.org/parks-and-trails/fort-zachary-taylor-historic-state-park",srcname:"Florida State Parks + secondary sources — conflicting"},
+
+{n:"USNS Vandenberg",area:"Key West",region:"keys",tier:"B",
+ lat:24.45600,lng:-81.74000,dist:6.90,distsrc:"computed from the Key West shoreline — approximate",
+ type:"scuba",cert:3,shore:false,depth:"superstructure at 95 to 100 ft, sand at ~140",wreck:true,free:false,dogs:"n/a",
+ addr:"Boat from Key West operators",tel:"",
+ hours:"Operator schedules; typically a morning two-tank.",
+ fees:"Charter fare — not published on a page I could reach. Call.",
+ park:"At the operator's dock.",
+ dogtxt:"Not applicable — boat site.",
+ tide:"any",
+ cond:"A 522-foot missile tracking ship, the second largest artificial reef in the world, with the radar dishes still on her. The best wreck dive in Florida by most accounts.",
+ haz:"Depth and current. Bottom time on air is very short at 100 feet.",
+ rules:"Sanctuary rules. <b>Advanced Open Water is mandatory and operators additionally require proof of a deep dive to at least 60 feet within the past year.</b>",
+ rev:"Consistently rated the best wreck in the state. The complaints are about current and about visibility on a bad day, never about the wreck.",
+ note:"<b>The strictest requirement on this page.</b> Advanced alone is not enough — you need a logged recent deep dive, so plan the Advanced course and this trip in the same season.",
+ src:"https://www.florida-scubadiving.com/maximum-depth-of-the-vandenberg-wreck-what-certification-you-need-to-see-it-all/",srcname:"Operator requirement summaries — confirm with the boat you book"}];
+
+/* ===== outfitters that run boats ===== */
+const SHOPS=[
+{n:"Pura Vida Divers",area:"Singer Island / Riviera Beach",region:"mainland",tier:"B",
+ lat:26.78200,lng:-80.03600,addr:"2513 Beach Ct, Riviera Beach (Singer Island), FL 33404",
+ tel:"",url:"https://www.puravidadivers.com/",
+ boats:"Two boats, Sirena and Marin.",
+ trips:"Daily scuba charters on the Palm Beach drifts, plus guided Blue Heron Bridge dives and night dives at the bridge.",
+ price:"Not published on a page I could reach. Call.",
+ courses:"Full PADI centre through professional level. Nitrox fills on site.",
+ snork:"Guided bridge snorkelling offered; confirm boat-trip snorkeller policy.",
+ rev:"88 Yelp reviews. Praise is for the guided bridge dives and the staff; the recurring complaint in the low reviews is booking and refund handling.",
+ note:"<b>The operator to call about Blue Heron Bridge.</b> A guided night dive there is the single best-value dive on this page.",
+ srcname:"puravidadivers.com + Yelp"},
+
+{n:"Force-E Scuba Centers",area:"Riviera Beach, Boynton, Boca, Pompano, Fort Lauderdale",region:"mainland",tier:"B",
+ lat:26.24100,lng:-80.09000,addr:"Five locations; Pompano Beach and Riviera Beach are the two nearest you",
+ tel:"",url:"https://www.force-e.com/",
+ boats:"Charters run out of the coastal shops.",
+ trips:"Reef and wreck charters along Palm Beach and Broward, plus a published shore-dive guide to Blue Heron Bridge and Lauderdale-by-the-Sea.",
+ price:"Not published on a page I could reach. Call.",
+ courses:"<b>Advanced Open Water runs on a published calendar</b> across the shops — dates posted through the year at Pompano, Fort Lauderdale and Riviera Beach.",
+ snork:"Ask per trip.",
+ rev:"Long-established, in business since 1976, with a large review footprint across five locations.",
+ note:"<b>The obvious route to your Advanced card</b>, because the course dates are published in advance and the Pompano shop is 22 miles from you.",
+ srcname:"force-e.com courses and shop pages"},
+
+{n:"South Florida Diving Headquarters",area:"Pompano Beach",region:"mainland",tier:"B",
+ lat:26.23700,lng:-80.08600,addr:"125 N Riverside Dr, Pompano Beach, FL 33062",
+ tel:"",url:"https://www.southfloridadiving.com/prices/",
+ boats:"Three boats.",
+ trips:"Daily reef and wreck trips over 23 miles of reef and more than 30 wrecks. <b>Departures 9:00 a.m. and 1:30 p.m. weekdays, 8:00 a.m. and 1:00 p.m. weekends.</b>",
+ price:"A price page exists on the operator site — read it before booking; I could not retrieve it here.",
+ courses:"PADI centre.",
+ snork:"Ask per trip; these are dive boats first.",
+ rev:"161 Yelp reviews with 156 photos as of September 2026 — the largest review base of any Broward dive operator on this page.",
+ note:"Closest serious dive fleet to Sunrise, on the same Hillsboro Inlet dock system you already know from the fishing side.",
+ srcname:"southfloridadiving.com + Yelp"},
+
+{n:"Sea Experience",area:"Fort Lauderdale — Bahia Mar",region:"mainland",tier:"B",
+ lat:26.11120,lng:-80.10560,addr:"801 Seabreeze Blvd (Bahia Mar Resort), Fort Lauderdale, FL 33316",
+ tel:"954-770-3483",url:"https://seaxp.com/dive-snorkel-trips/departures-prices/",
+ boats:"Glass-bottom snorkel boat plus dive boats, all at the Bahia Mar dock.",
+ trips:"<b>Snorkel trips 10:00 a.m. and 2:00 p.m. daily</b>, 2.5 hours including a narrated Intracoastal run out through Port Everglades. <b>Scuba departs 9:00 a.m.</b>",
+ price:"Published on the departures and prices page — read it directly; I could not retrieve the figures here.",
+ courses:"PADI centre with a training pool on site.",
+ snork:"<b>Yes, and it is the point</b> — this is the operator to use when you want to snorkel rather than dive, or to bring someone who does not dive.",
+ rev:"Long-running Fort Lauderdale operation with a large review base across Tripadvisor and the visitor bureau listings.",
+ note:"Same Bahia Mar dock as the Flamingo drift boat on Surf Command. Validated parking applies at the resort gate.",
+ srcname:"seaxp.com"},
+
+{n:"Jupiter Dive Center",area:"Jupiter",region:"mainland",tier:"B",
+ lat:26.94500,lng:-80.07600,addr:"1001 N US Highway 1, Jupiter, FL 33477",
+ tel:"561-745-7807",url:"https://jupiterdivecenter.com/",
+ boats:"Dive boats out of the Jupiter Inlet.",
+ trips:"<b>Charters daily at 9 a.m., plus 1:30 p.m. on weekends.</b> Reef drifts and the Jupiter wreck trek.",
+ price:"Charter fares not published on a page I could reach. The <b>Goliath Grouper specialty course is $279</b>, which covers materials, instruction, a two-tank charter and certification.",
+ courses:"Full PADI centre, plus the goliath specialty.",
+ snork:"Ask — these are deep drift boats and most of the sites are past snorkelling depth.",
+ rev:"The operator most associated with the goliath aggregation; reviews centre on that season and are strong.",
+ note:"<b>August and September only</b> for the goliath spawn, and the boats fill. Book well ahead.",
+ srcname:"jupiterdivecenter.com"},
+
+{n:"Coral Reef Park Company — Pennekamp concession",area:"Key Largo",region:"keys",tier:"B",
+ lat:25.12500,lng:-80.40700,addr:"102601 Overseas Hwy (MM 102.5), Key Largo, FL 33037",
+ tel:"305-451-6300",url:"https://pennekamppark.com/",
+ boats:"The state park's in-house concession fleet.",
+ trips:"<b>Snorkel tours 2.5 hours round trip with about 1.5 hours in the water</b>, plus scuba trips and glass-bottom boat runs to the reef, including Christ of the Abyss.",
+ price:"Park entry is separate and is $8 per vehicle of two to eight plus 50 cents per person. Tour fares are published by the concession.",
+ courses:"Scuba instruction offered through the concession.",
+ snork:"<b>Yes — this is the snorkel operator in Key Largo</b>, and the boats run all day.",
+ rev:"536 Yelp reviews on the park itself with 910 photos. The park rates well; the concession complaints are about crowding on peak-season boats.",
+ note:"<b>Pets are not allowed on the tour boats.</b> Book the first boat of the day for Christ of the Abyss.",
+ srcname:"pennekamppark.com + Florida State Parks"},
+
+{n:"Rainbow Reef Dive Center",area:"Key Largo",region:"keys",tier:"B",
+ lat:25.09800,lng:-80.43900,addr:"100800 Overseas Hwy, Key Largo, FL 33037",
+ tel:"",url:"https://www.rainbowreef.com/dive-prices-in-key-largo/",
+ boats:"One of the largest dive fleets in North America by their own description.",
+ trips:"Daily reef and wreck charters across the Key Largo sites, including the Spiegel Grove, Duane and Benwood. Shop open 8 a.m. to 8 p.m. daily.",
+ price:"A dive-price page and a charter schedule page both exist on the operator site — read them directly; I could not retrieve the figures here. <b>Tanks, weights and a free dive guide are included on every trip</b>, which is the detail that changes the real cost.",
+ courses:"All levels of training, plus dive-and-hotel packages.",
+ snork:"Snorkellers carried on scheduled trips.",
+ rev:"356 Yelp reviews with 411 photos as of September 2026 — the deepest review record of any Keys operator here.",
+ note:"The default Key Largo operator if you want the wrecks. Ask specifically what they require for the Spiegel Grove and the Duane when you book.",
+ srcname:"rainbowreef.com + Yelp"},
+
+{n:"Captain Hook's",area:"Marathon",region:"keys",tier:"B",
+ lat:24.71200,lng:-81.09000,addr:"11511 Overseas Hwy, Marathon, FL 33050",
+ tel:"305-743-2444",url:"https://captainhooks.com/thunderbolt-wreck-diving/",
+ boats:"Dive and snorkel fleet out of Marathon.",
+ trips:"<b>Thunderbolt wreck trips</b>, reef dives on Sombrero and Coffins Patch, and snorkel runs.",
+ price:"Trip pricing is on the operator's booking system; not retrievable here. Call.",
+ courses:"PADI training offered.",
+ snork:"Yes, on the reef trips.",
+ rev:"The Marathon operator most associated with the Thunderbolt; the wreck page states the requirements plainly, which is a good sign.",
+ note:"Same town as the Marathon Lady, so a Marathon overnight can be a dive day and a fishing day.",
+ srcname:"captainhooks.com"}];
+
+/* ===== engine ===== */
+const BANDS=[{max:0.25,cls:"near",col:"#3FA95F",lbl:"Under ¼ mi"},
+             {max:0.5,cls:"mid",col:"#E0A32B",lbl:"¼ to ½ mi"},
+             {max:1e9,cls:"far",col:"#2F5FD0",lbl:"Over ½ mi"}];
+function bandFor(d){return BANDS.find(b=>d<=b.max)}
+const CERTL=[["c0","Snorkel"],["c1","Open Water"],["c2","Advanced"],["c3","Advanced + recent deep"]];
+const YOURS=1;   /* Open Water */
+
+/* Next high slack at Lake Worth Pier, the station beside the bridge. */
+function nextHighs(n){
+ const now=new Date();
+ const ev=tideEvents("8722670",new Date(now.getFullYear(),now.getMonth(),now.getDate()),9)
+  .filter(e=>e.type==="H"&&e.t>now);
+ return ev.slice(0,n);
+}
+function hm(t){return t.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}
+function renderTides(){
+ const row=document.getElementById('tiderow'),sub=document.getElementById('tidesub');
+ const hs=nextHighs(4);
+ const end=new Date(TIDE_BASE[0],TIDE_BASE[1],TIDE_BASE[2]+(TIDE_DATA["8722670"]||[]).length-1);
+ if(sub)sub.textContent="Lake Worth Pier station 8722670, baked into this file. Table runs through "
+  +end.toLocaleDateString([],{month:'long',day:'numeric',year:'numeric'})+".";
+ if(!hs.length){row.innerHTML='<span class="no">Tide table has run out. Rebuild it before trusting this card.</span>';return}
+ const DN=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+ row.innerHTML=hs.map(h=>{
+  const inw=new Date(h.t.getTime()-30*60000);
+  return '<span>'+DN[h.t.getDay()]+' high <b>'+hm(h.t)+'</b> · '+h.v.toFixed(1)+' ft<br>'
+   +'<span style="color:var(--fg2)">get in about '+hm(inw)+'</span></span>'}).join("");
+ const mini=document.getElementById('tidemini');
+ if(mini)mini.textContent="Next high slack "+hm(hs[0].t);
+}
+
+let filter="all";
+function matches(s){switch(filter){
+ case"all":return true;
+ case"shore":return s.shore===true;
+ case"near":return s.dist<=0.25;
+ case"snorkel":return s.type==="snorkel"||s.type==="both";
+ case"ow":return s.cert<=YOURS;
+ case"adv":return s.cert>=2;
+ case"free":return s.free===true;
+ case"dogs":return s.dogs==="yes"||s.dogs==="limited";
+ case"wreck":return s.wreck===true;
+ case"mainland":return s.region==="mainland";
+ case"dade":return s.region==="dade";
+ case"keys":return s.region==="keys";
+ default:return true}}
+function renderList(){
+ const t=new Date();
+ document.getElementById('now').textContent=t.toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'});
+ const rows=[];let shown=0;
+ SITES.forEach((s,i)=>{
+  if(!matches(s))return;shown++;
+  const b=bandFor(s.dist),c=CERTL[s.cert];
+  const over=s.cert>YOURS;
+  rows.push('<li tabindex="0" data-i="'+i+'" data-open="false" style="border-left-color:'+b.col+'">'
+   +'<div class="top"><div><div class="nm">'+s.n+'</div>'
+   +'<div class="sub">'+s.area+' · '+(s.type==="both"?"snorkel and scuba":s.type)+' · '+s.depth+'</div></div>'
+   +'<span class="band '+b.cls+'">'+(s.shore?"Shore entry":b.lbl)+'</span></div>'
+   +'<div class="meta"><span class="tag t'+s.tier+'">TIER '+s.tier+'</span>'
+   +'<span class="cert '+c[0]+'">'+c[1]+(over?" — above your card":"")+'</span>'
+   +'<span>'+s.dist.toFixed(2)+' mi from shore</span>'
+   +'<span class="'+(s.free?"yes":"")+'">'+(s.free?"Free":"Fee")+'</span>'
+   +'<span class="'+(s.dogs==="no"?"no":s.dogs==="limited"?"flag":"")+'">'
+     +(s.dogs==="no"?"No dogs":s.dogs==="limited"?"Dogs limited":s.dogs==="yes"?"Dogs OK":"Dogs n/a")+'</span></div>'
+   +'<div class="body"><dl>'
+   +'<div class="row"><dt>Water</dt><dd>'+s.cond+'</dd></div>'
+   +'<div class="row"><dt>Distance</dt><dd>'+s.dist.toFixed(2)+' miles — '+s.distsrc+'</dd></div>'
+   +'<div class="row"><dt>Hours</dt><dd>'+s.hours+'</dd></div>'
+   +'<div class="row"><dt>Fees</dt><dd>'+s.fees+'</dd></div>'
+   +'<div class="row"><dt>Parking</dt><dd>'+s.park+'</dd></div>'
+   +'<div class="row"><dt>Dogs</dt><dd class="'+(s.dogs==="no"?"no":"flag")+'">'+s.dogtxt+'</dd></div>'
+   +'<div class="row"><dt>Hazards</dt><dd class="flag">'+s.haz+'</dd></div>'
+   +'<div class="row"><dt>Rules</dt><dd>'+s.rules+'</dd></div>'
+   +'<div class="row"><dt>Reviews</dt><dd>'+s.rev+'</dd></div>'
+   +'<div class="row"><dt>Read</dt><dd>'+s.note+'</dd></div>'
+   +'<div class="row"><dt>Where</dt><dd>'+s.addr+'<br><span style="color:var(--fg2)">Source: '+s.srcname+'</span></dd></div>'
+   +'</dl><div class="acts">'
+   +'<a href="https://maps.apple.com/?saddr='+HOME[0]+','+HOME[1]+'&daddr='+encodeURIComponent(s.addr.replace(/^Boat access[^—]*—\s*/,''))+'&dirflg=d">Directions</a>'
+   +(s.tel?'<a href="tel:'+s.tel.replace(/-/g,'')+'">Call '+s.tel+'</a>':'')
+   +(s.src?'<a href="'+s.src+'" target="_blank" rel="noopener">Verify source</a>':'')
+   +'</div></div></li>')});
+ document.getElementById('list').innerHTML=rows.join("")||'<li style="border-left-color:#1C4A5C;cursor:default">Nothing matches. Tap “All”.</li>';
+ document.getElementById('count').textContent=shown+(shown===1?" site":" sites");
+ document.getElementById('nearct').textContent=SITES.filter(s=>s.shore).length;
+ document.getElementById('totct').textContent=SITES.length;
+ const cm=document.getElementById('certmini');
+ if(cm)cm.textContent=SITES.filter(s=>s.cert<=YOURS).length+" within your Open Water card";
+}
+function renderShops(){
+ const host=document.getElementById('shoplist');
+ host.innerHTML=SHOPS.map(s=>'<div class="card"><div class="bt"><div>'
+  +'<div class="nm">'+s.n+'</div><div class="zsub">'+s.area+' · '+s.boats+'</div></div>'
+  +'<span class="tag t'+s.tier+'">TIER '+s.tier+'</span></div>'
+  +'<dl style="margin-top:11px">'
+  +'<div class="row"><dt>Trips</dt><dd>'+s.trips+'</dd></div>'
+  +'<div class="row"><dt>Price</dt><dd class="flag">'+s.price+'</dd></div>'
+  +'<div class="row"><dt>Courses</dt><dd>'+s.courses+'</dd></div>'
+  +'<div class="row"><dt>Snorkel</dt><dd>'+s.snork+'</dd></div>'
+  +'<div class="row"><dt>Reviews</dt><dd>'+s.rev+'</dd></div>'
+  +'<div class="row"><dt>Read</dt><dd>'+s.note+'</dd></div>'
+  +'<div class="row"><dt>Where</dt><dd>'+s.addr+'<br><span style="color:var(--fg2)">Source: '+s.srcname+'</span></dd></div>'
+  +'</dl><div class="acts">'
+  +'<a href="https://maps.apple.com/?saddr='+HOME[0]+','+HOME[1]+'&daddr='+encodeURIComponent(s.addr)+'&dirflg=d">Directions</a>'
+  +(s.tel?'<a href="tel:'+s.tel.replace(/-/g,'')+'">Call '+s.tel+'</a>':'')
+  +'<a href="'+s.url+'" target="_blank" rel="noopener">Book / verify</a>'
+  +'</div></div>').join("");
+ document.getElementById('shopcount').textContent=SHOPS.length+" operators · read 7 Sep 2026";
+}
+function showPane(t){document.querySelectorAll('#tabs .chip').forEach(c=>c.setAttribute('aria-pressed',c.dataset.t===t));
+ document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.id==="pane-"+t))}
+function focus(i){showPane("sites");filter="all";
+ document.querySelectorAll('#filters .chip').forEach(c=>c.setAttribute('aria-pressed',c.dataset.f==="all"));
+ renderList();
+ const li=document.querySelector('#list li[data-i="'+i+'"]');
+ if(li){li.dataset.open="true";li.scrollIntoView({behavior:'smooth',block:'center'})}}
+document.getElementById('list').addEventListener('click',e=>{
+ const li=e.target.closest('li[data-i]');if(li&&!e.target.closest('a'))li.dataset.open=li.dataset.open==="true"?"false":"true"});
+document.getElementById('list').addEventListener('keydown',e=>{if(e.key==="Enter"||e.key===" "){
+ const li=e.target.closest('li[data-i]');if(li){e.preventDefault();li.dataset.open=li.dataset.open==="true"?"false":"true"}}});
+document.getElementById('filters').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;
+ filter=b.dataset.f;document.querySelectorAll('#filters .chip').forEach(c=>c.setAttribute('aria-pressed',c===b));renderList()});
+document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;showPane(b.dataset.t)});
+
+/* ===== map ===== */
+const TILE_PACK=(typeof EMBEDDED_TILES!=="undefined")?EMBEDDED_TILES:null;
+const USGS="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}";
+const ESRI="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+let map=null,AERIAL=null,SHARP=null,mapMode="sharp";
+try{
+ const PackedLayer=L.TileLayer.extend({getTileUrl:function(c){
+  const z=this._getZoomForUrl(),k=z+"/"+c.x+"/"+c.y;
+  if(TILE_PACK&&TILE_PACK[k])return "data:image/jpeg;base64,"+TILE_PACK[k];
+  return L.Util.template(USGS,{z:z,x:c.x,y:c.y})}});
+ const SharpLayer=L.TileLayer.extend({getTileUrl:function(c){
+  return L.Util.template(ESRI,{z:this._getZoomForUrl(),x:c.x,y:c.y})}});
+ map=L.map('map',{zoomControl:true,attributionControl:true}).setView([26.30,-80.12],10);
+ AERIAL=new PackedLayer("",{maxNativeZoom:11,maxZoom:16,minZoom:7,attribution:'USGS · public domain'});
+ SHARP=new SharpLayer("",{maxNativeZoom:19,maxZoom:19,minZoom:7,attribution:'Esri World Imagery'});
+ setMapMode(TILE_PACK?"offline":"sharp");
+ L.circleMarker(HOME,{radius:7,color:"#F2EADA",weight:2.5,fillColor:"#061922",fillOpacity:1})
+  .addTo(map).bindPopup("<b>Home</b>10849 NW 23rd Ct, Sunrise");
+ SITES.forEach((s,i)=>{
+  const b=bandFor(s.dist);
+  const m=L.marker([s.lat,s.lng],{title:s.n,icon:L.divIcon({className:'',iconSize:[14,14],iconAnchor:[7,7],
+   html:'<div class="pin" style="background:'+b.col+'"></div>'})}).addTo(map);
+  m.on('click',()=>focus(i))});
+ SHOPS.forEach(s=>{
+  L.marker([s.lat,s.lng],{title:s.n+" — outfitter",
+   icon:L.divIcon({className:'',iconSize:[14,13],iconAnchor:[7,7],html:'<div class="pin shop"></div>'})})
+   .addTo(map).on('click',()=>showPane("shops"))});
+ document.getElementById('maptoggle').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(b)setMapMode(b.dataset.m)});
+ document.getElementById('zoomspot').addEventListener('change',e=>{
+  const i=+e.target.value;if(i>=0&&SITES[i])map.setView([SITES[i].lat,SITES[i].lng],15)});
+ document.getElementById('regionjump').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  document.querySelectorAll('#regionjump button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  if(b.dataset.r==="keys")map.fitBounds([[24.40,-81.90],[25.30,-80.20]],{padding:[16,16]});
+  else map.setView([26.40,-80.08],9)});
+ let tileFails=0,tileOK=false;
+ SHARP.on('tileload',()=>{tileOK=true});
+ SHARP.on('tileerror',()=>{if(++tileFails>8&&!tileOK&&mapMode==="sharp"&&TILE_PACK){
+  setMapMode("offline");
+  const n=document.getElementById('mapnote');
+  if(n){n.textContent="Sharp imagery unreachable — switched to the offline layer.";n.hidden=false}}});
+}catch(e){document.getElementById('map').innerHTML='<p style="padding:16px;text-align:center;color:#93AAB6;font-size:13px">Map unavailable. Every entry has a Directions link.</p>'}
+function setMapMode(m){
+ if(!map)return;mapMode=m;
+ [AERIAL,SHARP].forEach(l=>{if(l&&map.hasLayer(l))map.removeLayer(l)});
+ map.setMaxZoom(m==="sharp"?19:16);
+ document.querySelectorAll('#maptoggle button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===m));
+ map.addLayer(m==="sharp"?SHARP:AERIAL);
+ const el=document.getElementById('imgdate');
+ if(el)el.textContent=m==="sharp"
+  ?"Esri World Imagery · streamed · sharpest available, and blocked in the published copy"
+  :"USGS imagery · public domain · baked in at zoom 9–11 across Jupiter to Key West. Past zoom 11 you are looking at an upscale of an 11, not new detail.";
+}
+(function(){const z=document.getElementById('zoomspot');
+ if(z)SITES.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=s.n;z.appendChild(o)})})();
+
+renderTides();renderList();renderShops();
+if(map){setTimeout(()=>map.invalidateSize(),120);addEventListener('resize',()=>map.invalidateSize())}
+setInterval(renderTides,60000);
+</script>
