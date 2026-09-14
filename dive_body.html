@@ -831,14 +831,74 @@ const USGS="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly
 const ESRI="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 let map=null,AERIAL=null,SHARP=null,mapMode="sharp";
 try{
- const PackedLayer=L.TileLayer.extend({getTileUrl:function(c){
-  const z=this._getZoomForUrl(),k=z+"/"+c.x+"/"+c.y;
-  if(TILE_PACK&&TILE_PACK[k])return "data:image/jpeg;base64,"+TILE_PACK[k];
-  return L.Util.template(USGS,{z:z,x:c.x,y:c.y})}});
+ /* ===== Offline imagery: painted, never fetched =====
+    The pack is not uniform. Zoom 9-11 cover Jupiter to Key West, 12-14 only the
+    Broward beaches, and a few tiles are missing even inside those bands. The
+    previous version of this layer returned a live USGS URL whenever the pack
+    lacked the exact tile requested, and the artifact sandbox blocks that
+    service, so the map went blank as soon as you zoomed past the packed depth
+    or out to zoom 8 — which is exactly what it looked like.
+
+    This layer draws instead. Zooming in, it finds the deepest packed ancestor
+    and paints the quarter (or sixteenth) of it that the requested tile covers.
+    Zooming out, it mosaics whatever packed children exist. Only a tile with no
+    packed relative at any zoom falls through to the network, which is what
+    still makes the local copy sharper than the published one. The result can be
+    soft. It cannot be empty. */
+ function packAncestor(z,x,y){
+  if(!TILE_PACK)return null;
+  for(let dz=0;dz<=z;dz++){
+   const n=Math.pow(2,dz),px=Math.floor(x/n),py=Math.floor(y/n);
+   const k=(z-dz)+"/"+px+"/"+py;
+   if(TILE_PACK[k])return{k:k,n:n,sx:x-px*n,sy:y-py*n};
+  }
+  return null;
+ }
+ const PackedLayer=L.GridLayer.extend({
+  createTile:function(c,done){
+   const size=this.getTileSize(),tile=document.createElement('canvas');
+   tile.width=size.x;tile.height=size.y;
+   const ctx=tile.getContext('2d');
+   ctx.fillStyle="#0F2B36";ctx.fillRect(0,0,size.x,size.y);   /* land tone, never white */
+   let pending=1;
+   const finish=()=>{if(--pending<=0)done(null,tile)};
+   const a=packAncestor(c.z,c.x,c.y);
+   if(a){
+    const img=new Image();
+    img.onload=()=>{const sw=img.width/a.n,sh=img.height/a.n;
+     ctx.drawImage(img,a.sx*sw,a.sy*sh,sw,sh,0,0,size.x,size.y);finish()};
+    img.onerror=finish;
+    img.src="data:image/jpeg;base64,"+TILE_PACK[a.k];
+    return tile;
+   }
+   /* Zoomed out past the pack: mosaic the square from whatever is packed
+      below it. Each cell resolves through packAncestor, so a cell with no tile
+      at c.z+dz still draws from a shallower one rather than staying empty. */
+   const dz=c.z<=8?3:2,m=Math.pow(2,dz),cells=[];
+   for(let i=0;i<m;i++)for(let j=0;j<m;j++){
+    const ca=packAncestor(c.z+dz,c.x*m+i,c.y*m+j);
+    if(ca)cells.push({a:ca,i:i,j:j});
+   }
+   if(cells.length){
+    pending=cells.length;
+    const w=size.x/m,h=size.y/m;
+    cells.forEach(cl=>{const img=new Image();
+     img.onload=()=>{const sw=img.width/cl.a.n,sh=img.height/cl.a.n;
+      ctx.drawImage(img,cl.a.sx*sw,cl.a.sy*sh,sw,sh,cl.i*w,cl.j*h,w,h);finish()};
+     img.onerror=finish;
+     img.src="data:image/jpeg;base64,"+TILE_PACK[cl.a.k]});
+    return tile;
+   }
+   const img=new Image();
+   img.onload=()=>{ctx.drawImage(img,0,0,size.x,size.y);finish()};
+   img.onerror=finish;
+   img.src=L.Util.template(USGS,{z:c.z,x:c.x,y:c.y});
+   return tile;
+  }});
  const SharpLayer=L.TileLayer.extend({getTileUrl:function(c){
   return L.Util.template(ESRI,{z:this._getZoomForUrl(),x:c.x,y:c.y})}});
  map=L.map('map',{zoomControl:true,attributionControl:true}).setView([26.30,-80.12],10);
- AERIAL=new PackedLayer("",{maxNativeZoom:11,maxZoom:16,minZoom:7,attribution:'USGS · public domain'});
+ AERIAL=new PackedLayer({minZoom:6,maxZoom:19,attribution:'USGS · public domain'});
  SHARP=new SharpLayer("",{maxNativeZoom:19,maxZoom:19,minZoom:7,attribution:'Esri World Imagery'});
  setMapMode(TILE_PACK?"offline":"sharp");
  L.circleMarker(HOME,{radius:7,color:"#F2EADA",weight:2.5,fillColor:"#061922",fillOpacity:1})
@@ -871,13 +931,13 @@ try{
 function setMapMode(m){
  if(!map)return;mapMode=m;
  [AERIAL,SHARP].forEach(l=>{if(l&&map.hasLayer(l))map.removeLayer(l)});
- map.setMaxZoom(m==="sharp"?19:16);
+ map.setMaxZoom(19);
  document.querySelectorAll('#maptoggle button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===m));
  map.addLayer(m==="sharp"?SHARP:AERIAL);
  const el=document.getElementById('imgdate');
  if(el)el.textContent=m==="sharp"
   ?"Esri World Imagery · streamed · sharpest available, and blocked in the published copy"
-  :"USGS imagery · public domain · baked in at zoom 9–11 across Jupiter to Key West. Past zoom 11 you are looking at an upscale of an 11, not new detail.";
+  :"USGS imagery · public domain · baked into this file. Sharp to zoom 11 across the span and to 14 over Broward; past that it is an upscale, not new detail, and it no longer goes blank.";
 }
 (function(){const z=document.getElementById('zoomspot');
  if(z)SITES.forEach((s,i)=>{const o=document.createElement('option');o.value=i;o.textContent=s.n;z.appendChild(o)})})();

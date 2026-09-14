@@ -2483,12 +2483,69 @@ const TILE_PACK=(typeof EMBEDDED_TILES!=="undefined")?EMBEDDED_TILES:null;
 const USGS="https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}";
 const ESRI="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
-const PackedLayer=L.TileLayer.extend({
- getTileUrl:function(c){
-  const z=this._getZoomForUrl();            /* respects maxNativeZoom */
-  const k=z+"/"+c.x+"/"+c.y;
-  if(TILE_PACK&&TILE_PACK[k])return "data:image/jpeg;base64,"+TILE_PACK[k];
-  return L.Util.template(USGS,{z:z,x:c.x,y:c.y});
+/* ===== Offline imagery: painted, never fetched =====
+   The pack is not uniform. Zoom 9-11 cover Jupiter to Key West, 12-14 only the
+   Broward beaches, and a few tiles are missing even inside those bands. The
+   previous version of this layer returned a live USGS URL whenever the pack
+   lacked the exact tile requested, and the artifact sandbox blocks that
+   service, so the map went blank as soon as you zoomed past the packed depth
+   or out to zoom 8 — which is exactly what it looked like.
+
+   This layer draws instead. Zooming in, it finds the deepest packed ancestor
+   and paints the quarter (or sixteenth) of it that the requested tile covers.
+   Zooming out, it mosaics whatever packed children exist. Only a tile with no
+   packed relative at any zoom falls through to the network, which is what
+   still makes the local copy sharper than the published one. The result can be
+   soft. It cannot be empty. */
+function packAncestor(z,x,y){
+ if(!TILE_PACK)return null;
+ for(let dz=0;dz<=z;dz++){
+  const n=Math.pow(2,dz),px=Math.floor(x/n),py=Math.floor(y/n);
+  const k=(z-dz)+"/"+px+"/"+py;
+  if(TILE_PACK[k])return{k:k,n:n,sx:x-px*n,sy:y-py*n};
+ }
+ return null;
+}
+const PackedLayer=L.GridLayer.extend({
+ createTile:function(c,done){
+  const size=this.getTileSize(),tile=document.createElement('canvas');
+  tile.width=size.x;tile.height=size.y;
+  const ctx=tile.getContext('2d');
+  ctx.fillStyle="#0F2B36";ctx.fillRect(0,0,size.x,size.y);   /* land tone, never white */
+  let pending=1;
+  const finish=()=>{if(--pending<=0)done(null,tile)};
+  const a=packAncestor(c.z,c.x,c.y);
+  if(a){
+   const img=new Image();
+   img.onload=()=>{const sw=img.width/a.n,sh=img.height/a.n;
+    ctx.drawImage(img,a.sx*sw,a.sy*sh,sw,sh,0,0,size.x,size.y);finish()};
+   img.onerror=finish;
+   img.src="data:image/jpeg;base64,"+TILE_PACK[a.k];
+   return tile;
+  }
+  /* Zoomed out past the pack: mosaic the square from whatever is packed
+     below it. Each cell resolves through packAncestor, so a cell with no tile
+     at c.z+dz still draws from a shallower one rather than staying empty. */
+  const dz=c.z<=8?3:2,m=Math.pow(2,dz),cells=[];
+  for(let i=0;i<m;i++)for(let j=0;j<m;j++){
+   const ca=packAncestor(c.z+dz,c.x*m+i,c.y*m+j);
+   if(ca)cells.push({a:ca,i:i,j:j});
+  }
+  if(cells.length){
+   pending=cells.length;
+   const w=size.x/m,h=size.y/m;
+   cells.forEach(cl=>{const img=new Image();
+    img.onload=()=>{const sw=img.width/cl.a.n,sh=img.height/cl.a.n;
+     ctx.drawImage(img,cl.a.sx*sw,cl.a.sy*sh,sw,sh,cl.i*w,cl.j*h,w,h);finish()};
+    img.onerror=finish;
+    img.src="data:image/jpeg;base64,"+TILE_PACK[cl.a.k]});
+   return tile;
+  }
+  const img=new Image();
+  img.onload=()=>{ctx.drawImage(img,0,0,size.x,size.y);finish()};
+  img.onerror=finish;
+  img.src=L.Util.template(USGS,{z:c.z,x:c.x,y:c.y});
+  return tile;
  }});
 /* ===== Sentinel-2, the consistently-updated option =====
    ESA flies Sentinel-2 over this coast every 5 days, free and without a key.
@@ -2572,7 +2629,7 @@ function setMapMode(m){
  if(!map)return;
  mapMode=m;
  [SCHEM,AERIAL,SHARP,S2].forEach(l=>{if(l&&map.hasLayer(l))map.removeLayer(l)});
- map.setMaxZoom(m==="sharp"?19:(m==="offline"?17:(m==="recent"?15:13)));
+ map.setMaxZoom(m==="sharp"?19:(m==="offline"?19:(m==="recent"?15:13)));
  document.querySelectorAll('#maptoggle button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===m));
  const pick=m==="schematic"?SCHEM:(m==="offline"?AERIAL:(m==="recent"?S2:SHARP));
  if(pick){map.addLayer(pick)}
@@ -2588,7 +2645,7 @@ function imageryStamp(){
  if(mapMode==="recent")return;   /* its own loader writes the stamp */
  if(mapMode!=="sharp"){
   el.textContent=mapMode==="offline"
-   ?"USGS imagery · public domain · about 2 m per pixel, no detail past zoom 16"
+   ?"USGS imagery · public domain · baked into this file. Sharp to zoom 11 across the span and to 14 over Broward; past that it is an upscale of the best packed tile, not new detail."
    :"Hand-drawn schematic · no imagery";
   return}
  const c=map.getCenter(), now=Date.now();
@@ -2614,7 +2671,7 @@ try{
  map=L.map('map',{scrollWheelZoom:false,minZoom:8,maxZoom:19}).setView([26.30,-80.12],10);
  map.attributionControl.setPrefix('');
 
- AERIAL=new PackedLayer("",{maxNativeZoom:16,maxZoom:17,minZoom:8,
+ AERIAL=new PackedLayer({minZoom:6,maxZoom:19,
   attribution:'USGS The National Map (public domain)'});
  SHARP=new SharpLayer("",{maxNativeZoom:19,maxZoom:19,minZoom:8,
   attribution:'Esri World Imagery'});
