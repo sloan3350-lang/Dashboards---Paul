@@ -651,19 +651,89 @@ views.daily = root => {
   c3.append(el('p','tiny','Target follows the ~1.6 g/kg plateau from Morton et al., BJSM 2018, biased up for being in a deficit and over 40. The floor exists because a target you never hit is not a target.'));
   root.append(c3);
 
-  // QUICK WEIGH-IN
+  // WEIGH-IN
   const c4 = el('div','card');
-  c4.append(el('h2','','This morning'));
+  c4.append(el('h2','','Weight'));
   c4.append(el('p','hint','Weigh after the bathroom, before food. Same conditions every time or the trend lies.'));
-  const wr = el('div','row');
-  const wi = el('input'); wi.type = 'number'; wi.step = '0.1'; wi.inputMode = 'decimal';
-  wi.placeholder = 'lb'; wi.value = d.weight;
-  wi.oninput = () => { d.weight = wi.value === '' ? '' : Number(wi.value); save(); };
-  wi.onblur = () => render();
-  wr.append(wi);
-  c4.append(wr);
+
+  const wrow = el('div','row wrap');
+  const dIn = el('input'); dIn.type = 'date'; dIn.id = 'weighDate';
+  dIn.max = today(); dIn.value = weighDate;
+  dIn.style.cssText = 'flex:1 1 150px;text-align:left';
+  dIn.setAttribute('aria-label', 'Date of weigh-in');
+
+  const wIn = el('input'); wIn.type = 'number'; wIn.step = '0.1'; wIn.inputMode = 'decimal';
+  wIn.id = 'weighLb'; wIn.placeholder = 'lb'; wIn.style.flex = '1 1 90px';
+  wIn.setAttribute('aria-label', 'Weight in pounds');
+  const onDate = () => {
+    weighDate = dIn.value || today();
+    const ex = S.daily[weighDate] && S.daily[weighDate].weight;
+    wIn.value = ex || '';
+  };
+  onDate();
+  dIn.onchange = onDate;
+
+  const sv = el('button','btn primary','Record');
+  sv.onclick = () => {
+    const lb = Number(wIn.value);
+    if (!lb || lb <= 0) { wIn.focus(); return; }
+    const day = S.daily[weighDate] || (S.daily[weighDate] = { water:0, sleep:'', protein:'', weight:'' });
+    const prev = previousWeight(weighDate);
+    day.weight = lb;
+    weighFlash = { lb, date: weighDate, delta: prev == null ? null : Math.round((lb - prev) * 10) / 10 };
+    save(); render();
+  };
+  wIn.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); sv.click(); } };
+  wrow.append(dIn, wIn, sv);
+  c4.append(wrow);
+
+  if (weighFlash) {
+    const a = el('div','alert good');
+    const dl = weighFlash.delta;
+    a.innerHTML = '<b>Recorded ' + weighFlash.lb.toFixed(1) + ' lb for ' + esc(prettyDate(weighFlash.date)) + '</b>' +
+      (dl == null ? 'First weigh-in on record.'
+       : dl === 0 ? 'No change since the last one.'
+       : Math.abs(dl).toFixed(1) + ' lb ' + (dl < 0 ? 'down from' : 'up on') + ' your last weigh-in.');
+    c4.append(a);
+  }
+
+  const ents = weightEntries().sort((a, b) => b.date.localeCompare(a.date));
+  if (ents.length) {
+    c4.append(Object.assign(el('div','vessel-h'), { textContent: 'On record' }));
+    const log = el('div','weighlog');
+    ents.slice(0, 6).forEach((e, i) => {
+      const prev = ents[i + 1];
+      const r = el('div','weighrow');
+      r.append(el('span','weigh-d', prettyDate(e.date)));
+      r.append(el('span','spacer'));
+      r.append(el('span','weigh-v', e.lb.toFixed(1)));
+      const dl = prev ? Math.round((e.lb - prev.lb) * 10) / 10 : null;
+      const chip = el('span','weigh-c' + (dl == null ? '' : dl < 0 ? ' down' : dl > 0 ? ' up' : ''));
+      chip.textContent = dl == null ? '—' : (dl > 0 ? '+' : dl < 0 ? '\u2212' : '') + Math.abs(dl).toFixed(1);
+      r.append(chip);
+      log.append(r);
+    });
+    c4.append(log);
+    c4.append(Object.assign(el('p','tiny'), { textContent:
+      ents.length + (ents.length === 1 ? ' weigh-in on record. ' : ' weigh-ins on record. ') +
+      'The Body tab charts all of them with the trend line.' }));
+  }
   root.append(c4);
 };
+
+let weighDate = today();
+let weighFlash = null;
+
+function prettyDate(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  if (iso === today()) return 'today';
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function previousWeight(beforeIso) {
+  const prior = weightEntries().filter(e => e.date < beforeIso).sort((a, b) => a.date.localeCompare(b.date));
+  return prior.length ? prior[prior.length - 1].lb : null;
+}
 
 function kylix() {
   return `<svg viewBox="0 0 28 30" aria-hidden="true">
