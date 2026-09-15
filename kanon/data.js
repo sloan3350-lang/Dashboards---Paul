@@ -118,6 +118,133 @@ const JOINTS = ['shoulder','elbow','wrist','lowback','hip','knee'];
 EX.forEach(e => { e.video = VID(e.name); });
 const byId = id => EX.find(e => e.id === id);
 
+/* ---- expanded library: big-box gym (Crunch Sunrise has all of this) ----
+ * equip tags let the generator respect what is actually available, and let a
+ * busy floor be worked around: 'machine' and 'cable' options are plentiful,
+ * 'rack' and 'bar' are the ones with queues at 6pm. */
+const EX2 = [
+  // squat / quad
+  { id:'pendulum',  slot:'squat',  name:'Pendulum / V-squat',       inc:10, equip:'machine', joints:{knee:1,lowback:0,hip:1},
+    cue:'Back supported the whole way. Heavy quad work with almost nothing asked of the spine.' },
+  { id:'legext',    slot:'squat',  name:'Leg extension',            inc:10, equip:'machine', joints:{knee:1,lowback:0,hip:0},
+    cue:'Pure quad, no hip. Pause at the top rather than swinging up to it.' },
+  { id:'bulgarian', slot:'squat',  name:'Bulgarian split squat',    inc:5,  equip:'db',      joints:{knee:2,lowback:1,hip:2},
+    cue:'Rear foot elevated, weight through the front heel. Brutal at light loads, which is the point.' },
+  { id:'stepup',    slot:'squat',  name:'Step-up',                  inc:5,  equip:'db',      joints:{knee:1,lowback:0,hip:1},
+    cue:'Drive through the top foot. Do not push off the floor with the trailing leg.' },
+  { id:'frontsq',   slot:'squat',  name:'Front squat',              inc:10, equip:'rack',    joints:{knee:2,lowback:1,hip:1},
+    cue:'Elbows high. The bar rolls forward the moment they drop.' },
+  { id:'sissysq',   slot:'squat',  name:'Sissy squat',              inc:5,  equip:'bw',      joints:{knee:2,lowback:0,hip:0},
+    cue:'Knees travel forward, hips stay extended. Hard on the knee, so only if it is quiet.' },
+
+  // horizontal press
+  { id:'bbbench',   slot:'hpress', name:'Barbell bench press',      inc:5,  equip:'rack',    joints:{shoulder:2,elbow:1,wrist:1},
+    cue:'Shoulder blades pinned down and back. Touch the lower chest, not the throat.' },
+  { id:'smithbench',slot:'hpress', name:'Smith machine bench',      inc:10, equip:'machine', joints:{shoulder:1,elbow:1,wrist:1},
+    cue:'Fixed path, so you can push closer to failure safely on your own.' },
+  { id:'hammerchest',slot:'hpress',name:'Hammer Strength chest press',inc:10,equip:'machine',joints:{shoulder:1,elbow:1,wrist:0},
+    cue:'Independent arms, so the strong side cannot carry the weak one.' },
+  { id:'dips',      slot:'hpress', name:'Dip (chest-biased)',       inc:5,  equip:'bw',      joints:{shoulder:2,elbow:2,wrist:1},
+    cue:'Lean forward to bias the chest. Stop at upper arm parallel, not deeper.' },
+  { id:'declinepress',slot:'hpress',name:'Decline press',           inc:10, equip:'machine', joints:{shoulder:1,elbow:1,wrist:0},
+    cue:'Often the friendliest press angle for a cranky shoulder.' },
+
+  // vertical pull
+  { id:'pullup',    slot:'vpull',  name:'Pull-up',                  inc:5,  equip:'bw',      joints:{shoulder:2,elbow:2,wrist:1},
+    cue:'Full hang to chin over the bar. Add weight before adding reps past twelve.' },
+  { id:'chinup',    slot:'vpull',  name:'Chin-up',                  inc:5,  equip:'bw',      joints:{shoulder:1,elbow:2,wrist:1},
+    cue:'Supinated grip. More biceps, usually easier on the shoulder than a wide pull-up.' },
+  { id:'hammerpull',slot:'vpull',  name:'Hammer Strength pulldown', inc:10, equip:'machine', joints:{shoulder:1,elbow:1,wrist:0},
+    cue:'Chest pad takes the torso out of it. Just pull the elbow to the hip.' },
+  { id:'uniPull',   slot:'vpull',  name:'Single-arm cable pulldown',inc:5,  equip:'cable',   joints:{shoulder:1,elbow:1,wrist:0},
+    cue:'One side at a time, full stretch overhead. Good for evening out a lopsided back.' },
+
+  // hinge / ham-glute
+  { id:'ghr',       slot:'hinge',  name:'Glute-ham raise',          inc:5,  equip:'machine', joints:{lowback:1,hip:1,knee:2},
+    cue:'Lower under control as far as you can hold, then pull back. Hamstrings at long length.' },
+  { id:'hipthrust', slot:'hinge',  name:'Barbell hip thrust',       inc:10, equip:'bar',     joints:{lowback:1,hip:1,knee:0},
+    cue:'Chin tucked, ribs down, pause at lockout. Glutes without loading the spine.' },
+  { id:'goodmorning',slot:'hinge', name:'Good morning',             inc:5,  equip:'rack',    joints:{lowback:2,hip:2,knee:0},
+    cue:'Light. This is a hamstring and low-back movement that punishes ego.' },
+  { id:'convdl',    slot:'hinge',  name:'Conventional deadlift',    inc:10, equip:'bar',     joints:{lowback:2,hip:2,knee:1},
+    cue:'Set the lats before the bar moves. The most fatiguing lift in the building, so do not stack it.' },
+  { id:'nordic',    slot:'hinge',  name:'Nordic curl',              inc:5,  equip:'bw',      joints:{lowback:0,hip:0,knee:2},
+    cue:'Lower as slowly as you can control. Strongest known protection against a hamstring strain.' },
+
+  // horizontal pull
+  { id:'tbar',      slot:'hpull',  name:'T-bar row',                inc:10, equip:'bar',     joints:{lowback:2,shoulder:1,elbow:1},
+    cue:'Chest up, hinge held. Heavy mid-back work if the low back is happy.' },
+  { id:'hammerrow', slot:'hpull',  name:'Hammer Strength row',      inc:10, equip:'machine', joints:{lowback:0,shoulder:1,elbow:1},
+    cue:'Chest supported, one arm at a time if you want the stretch.' },
+  { id:'pendlay',   slot:'hpull',  name:'Pendlay row',              inc:10, equip:'bar',     joints:{lowback:2,shoulder:1,elbow:1},
+    cue:'Dead stop on the floor each rep. Strict, no body english.' },
+  { id:'invrow',    slot:'hpull',  name:'Inverted row',             inc:5,  equip:'bw',      joints:{lowback:0,shoulder:1,elbow:1},
+    cue:'Body in one line. Raise the bar to make it easier, lower it to make it harder.' },
+  { id:'revfly',    slot:'hpull',  name:'Reverse pec deck',         inc:5,  equip:'machine', joints:{lowback:0,shoulder:1,elbow:0},
+    cue:'Rear delts. Light, high reps, no shrugging.' },
+
+  // vertical press
+  { id:'ohp',       slot:'vpress', name:'Standing overhead press',  inc:5,  equip:'rack',    joints:{shoulder:2,elbow:1,wrist:1},
+    cue:'Squeeze the glutes so the press does not become a standing incline.' },
+  { id:'smithshld', slot:'vpress', name:'Smith machine shoulder press',inc:10,equip:'machine',joints:{shoulder:1,elbow:1,wrist:0},
+    cue:'Fixed path overhead. Useful when the stabilisers give out before the delts.' },
+  { id:'arnold',    slot:'vpress', name:'Arnold press',             inc:5,  equip:'db',      joints:{shoulder:2,elbow:1,wrist:1},
+    cue:'Rotate as you press. Skip it if the shoulder dislikes the bottom position.' },
+  { id:'machlat',   slot:'vpress', name:'Machine lateral raise',    inc:5,  equip:'machine', joints:{shoulder:1,elbow:0,wrist:0},
+    cue:'Pad against the upper arm. Constant tension, no momentum available.' },
+  { id:'uprow',     slot:'vpress', name:'Cable upright row',        inc:5,  equip:'cable',   joints:{shoulder:2,elbow:1,wrist:1},
+    cue:'Wide grip, stop at chest height. Drop it if the shoulder pinches at the top.' },
+
+  // arms
+  { id:'ezcurl',    slot:'arms',   name:'EZ-bar curl',              inc:5,  equip:'bar',     joints:{elbow:1,wrist:1,shoulder:0},
+    cue:'Elbows pinned to the ribs. The angled grip is kinder to the wrist than a straight bar.' },
+  { id:'inclinecurl',slot:'arms',  name:'Incline dumbbell curl',    inc:5,  equip:'db',      joints:{elbow:1,wrist:0,shoulder:1},
+    cue:'Arms behind the body puts the long head at full stretch. Light weight.' },
+  { id:'hammercurl',slot:'arms',   name:'Hammer curl',              inc:5,  equip:'db',      joints:{elbow:1,wrist:0,shoulder:0},
+    cue:'Neutral grip. Brachialis and forearm, easiest curl on a sore elbow.' },
+  { id:'pushdown',  slot:'arms',   name:'Cable pushdown',           inc:5,  equip:'cable',   joints:{elbow:1,wrist:0,shoulder:0},
+    cue:'Elbows still. Only the forearm moves.' },
+  { id:'ohext',     slot:'arms',   name:'Overhead cable extension', inc:5,  equip:'cable',   joints:{elbow:2,wrist:0,shoulder:1},
+    cue:'Long head at stretch. Back off if the elbow complains at the bottom.' },
+  { id:'skullcrush',slot:'arms',   name:'Skull crusher',            inc:5,  equip:'bar',     joints:{elbow:2,wrist:1,shoulder:0},
+    cue:'Lower behind the forehead, not to it. Notorious for elbows, so keep it light.' },
+
+  // calves / core
+  { id:'calfstand', slot:'calves', name:'Standing calf raise',      inc:10, equip:'machine', joints:{knee:0,hip:0,lowback:0},
+    cue:'Full stretch at the bottom, pause at the top. The stretch is where the growth is.' },
+  { id:'calfseat',  slot:'calves', name:'Seated calf raise',        inc:10, equip:'machine', joints:{knee:1,hip:0,lowback:0},
+    cue:'Bent knee biases the soleus. Slow, and do not bounce.' },
+  { id:'abwheel',   slot:'core',   name:'Ab wheel rollout',         inc:5,  equip:'bw',      joints:{lowback:1,shoulder:1,hip:0},
+    cue:'Ribs down, do not let the low back sag. Shorten the range before you lose the brace.' },
+  { id:'cablecrunch',slot:'core',  name:'Cable crunch',             inc:10, equip:'cable',   joints:{lowback:1,shoulder:0,hip:0},
+    cue:'Flex the spine against the load. Hips stay put.' },
+  { id:'hanglegraise',slot:'core', name:'Hanging leg raise',        inc:5,  equip:'bw',      joints:{lowback:1,shoulder:1,hip:1},
+    cue:'Curl the pelvis up rather than just swinging the legs.' }
+];
+
+const SLOTS2 = [
+  { id: 'arms',   name: 'Arms',        muscles: ['biceps', 'triceps'] },
+  { id: 'calves', name: 'Calves',      muscles: ['calves'] },
+  { id: 'core',   name: 'Core',        muscles: ['abs', 'obliques'] }
+];
+
+SLOTS2.forEach(s2 => { if (!SLOTS.find(x => x.id === s2.id)) SLOTS.push(s2); });
+EX2.forEach(e => { if (!EX.find(x => x.id === e.id)) { e.video = VID(e.name); EX.push(e); } });
+
+// default equipment for the originals, and fold the new lifts into substitution
+EX.forEach(e => { if (!e.equip) e.equip = /machine|press|pulldown|curl|deck|extension/i.test(e.name) ? 'machine' : 'db'; });
+Object.keys(SUBS).forEach(slot => {
+  EX.filter(e => e.slot === slot && !SUBS[slot].includes(e.id))
+    .sort((a, b) => jointCost(a) - jointCost(b))
+    .forEach(e => SUBS[slot].push(e.id));
+});
+['arms','calves','core'].forEach(slot => {
+  SUBS[slot] = EX.filter(e => e.slot === slot).sort((a, b) => jointCost(a) - jointCost(b)).map(e => e.id);
+});
+function jointCost(e) {
+  return JOINTS.reduce((t, j) => t + ((e.joints && e.joints[j]) || 0), 0);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { EX, SUBS, SLOTS, JOINTS, byId };
 }

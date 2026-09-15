@@ -254,3 +254,24 @@ input[type=date]{text-align:left}
 .planrow{display:flex;align-items:center;gap:12px;padding:11px 2px;
          border-bottom:1px solid var(--line)}
 .planrow:last-child{border-bottom:0}
+
+/* ---- mesocycle wizard ---- */
+.volgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(74px,1fr));gap:7px;margin-bottom:6px}
+.volcell{background:var(--surface2);border:1px solid var(--line);border-radius:8px;
+         padding:10px 6px;text-align:center;border-left-width:3px}
+.volcell.good{border-left-color:var(--good)}
+.volcell.ok{border-left-color:var(--warn)}
+.volcell.low{border-left-color:var(--accent)}
+.volnum{display:block;font-family:var(--serif);font-size:22px;font-weight:700;
+        font-variant-numeric:tabular-nums;line-height:1}
+.vollbl{display:block;font-size:9px;letter-spacing:.09em;text-transform:uppercase;
+        color:var(--muted);margin-top:5px}
+.daycard{background:var(--surface2);border:1px solid var(--line);border-radius:9px;
+         padding:13px;margin-bottom:9px}
+.daycard .planrow{padding:8px 0;border-bottom:1px solid var(--line)}
+.daycard .planrow:last-child{border-bottom:0}
+.daycard .lift-n{font-size:15px}
+.rowswap{background:none;border:0;padding:0;width:40px;height:44px;flex:none;color:var(--muted);
+         display:flex;align-items:center;justify-content:center;border-radius:7px}
+.rowswap svg{width:19px;height:19px}
+.rowswap:hover,.rowswap:focus-visible{color:var(--accent);background:var(--surface2)}

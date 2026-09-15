@@ -16,13 +16,14 @@ function seed() {
     profile: { sex:'male', age:44, heightIn:70, goal:'cut', appetiteSuppressed:true, theme:'dark',
                startWeight:219, targetWeight:207, trainDays:'Tue / Sat' },
     week: 1,
-    next: 'A',
-    plan: {
-      A: [mk('squat','legpress',1), mk('hpress','machchest',1), mk('vpull','latpulln',1),
-          mk('hinge','rdl'),        mk('hpull','csrow'),        mk('vpress','machshld')],
-      B: [mk('squat','hacksquat',1),mk('hpress','inclinemach',1),mk('vpull','assistpull',1),
-          mk('hinge','legcurl'),    mk('hpull','cablerow'),     mk('vpress','latraise')]
-    },
+    cur: 0,
+    days: [
+      { name: 'Full body A', slots: [mk('squat','legpress',1), mk('hpress','machchest',1),
+          mk('vpull','latpulln',1), mk('hinge','rdl'), mk('hpull','csrow'), mk('vpress','machshld')] },
+      { name: 'Full body B', slots: [mk('squat','hacksquat',1), mk('hpress','inclinemach',1),
+          mk('vpull','assistpull',1), mk('hinge','legcurl'), mk('hpull','cablerow'), mk('vpress','latraise')] }
+    ],
+    setup: { days: 2, minutes: 50 },
     sessions: [], quarantine: {},
     daily: {
       '2026-08-30': { water:0, sleep:'', protein:'', weight:219.0 },
@@ -40,9 +41,17 @@ function load() {
     if (r) {
       const st = Object.assign(seed(), JSON.parse(r));
       // plans saved before `primary` existed: the first three slots carried it
-      ['A','B'].forEach(L => (st.plan[L] || []).forEach((p, i) => {
+      // plans saved as a fixed A/B pair become a list of days
+      if (st.plan && !Array.isArray(st.days)) {
+        st.days = [{ name: 'Full body A', slots: st.plan.A || [] },
+                   { name: 'Full body B', slots: st.plan.B || [] }];
+        st.cur = st.next === 'B' ? 1 : 0;
+      }
+      delete st.plan; delete st.next;
+      (st.days || []).forEach(d => (d.slots || []).forEach((p, i) => {
         if (p.primary === undefined) p.primary = i < 3;
       }));
+      if (typeof st.cur !== 'number' || !st.days[st.cur]) st.cur = 0;
       return st;
     }
   }
@@ -103,8 +112,8 @@ function render() {
   });
   const wb = $('#weekBadge');
   wb.textContent = S.preview
-    ? 'Wk ' + S.preview.week + ' \u00b7 ' + S.preview.letter + ' \u00b7 preview'
-    : 'Wk ' + S.week + ' \u00b7 ' + S.next + (S.week === 5 ? ' \u00b7 deload' : '');
+    ? 'Wk ' + S.preview.week + ' \u00b7 ' + dayName(S.preview.day) + ' \u00b7 preview'
+    : 'Wk ' + S.week + ' \u00b7 ' + dayName(S.cur) + (S.week === 5 ? ' \u00b7 deload' : '');
   wb.classList.toggle('previewing', !!S.preview);
   document.querySelectorAll('.tab').forEach(t =>
     t.setAttribute('aria-selected', String(t.dataset.view === current)));
@@ -115,25 +124,26 @@ document.querySelectorAll('.tab').forEach(t =>
 /* =================== TRAIN =================== */
 views.train = root => {
   const pv = S.preview;
-  const letter = pv ? pv.letter : S.next;
+  const dayIdx = pv ? pv.day : S.cur;
   const week = pv ? pv.week : S.week;
-  const plan = S.plan[letter];
+  const day = S.days[dayIdx] || S.days[0];
+  const plan = day.slots;
   const dl = deloadCheckLocal();
 
   // Preview never touches the draft: browsing ahead must not create log state.
-  if (!pv && (!S.draft || S.draft.letter !== letter)) {
-    S.draft = { letter, date: today(), week: S.week, entries: {} };
+  if (!pv && (!S.draft || S.draft.day !== dayIdx)) {
+    S.draft = { day: dayIdx, date: today(), week: S.week, entries: {} };
   }
 
   if (pv) {
     const banner = el('div','card preview');
     banner.append(el('div','eyebrow','Previewing'));
-    banner.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' \u00b7 Week ' + week }));
+    banner.append(Object.assign(el('h2'), { textContent: day.name + ' \u00b7 Week ' + week }));
     banner.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
     banner.append(Object.assign(el('p','tiny'), { textContent:
-      'Looking ahead only. Nothing here is logged, and your current session is still Session ' +
-      S.next + ', week ' + S.week + '.' }));
-    const back = el('button','btn primary block','Back to Session ' + S.next + ', week ' + S.week);
+      'Looking ahead only. Nothing here is logged, and your current session is still ' +
+      dayName(S.cur) + ', week ' + S.week + '.' }));
+    const back = el('button','btn primary block','Back to ' + dayName(S.cur) + ', week ' + S.week);
     back.style.marginTop = '12px';
     back.onclick = () => { S.preview = null; save(); render(); };
     banner.append(back);
@@ -153,7 +163,7 @@ views.train = root => {
   himg.onerror = () => { head.classList.add('noimg'); himg.remove(); };
   head.append(himg);
   const ov = el('div','hero-ov');
-  ov.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
+  ov.append(Object.assign(el('h2'), { textContent: day.name + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
   ov.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
   head.append(ov);
   if (dl.deload && S.week !== 5) {
@@ -177,7 +187,7 @@ views.train = root => {
     sh.append(dis);
     sum.append(sh);
     sum.append(Object.assign(el('p','hint'), { textContent:
-      'Session ' + S.lastSummary.letter + ', week ' + S.lastSummary.week + ', ' + S.lastSummary.date +
+      S.lastSummary.name + ', week ' + S.lastSummary.week + ', ' + S.lastSummary.date +
       '. These carried straight into the targets below.' }));
     const ul = el('div','changes');
     S.lastSummary.lines.forEach(l => {
@@ -215,6 +225,8 @@ function weekBlurb(week) {
 
 function deloadCheckLocal() { return deloadCheck(S.week, deloadSignals()); }
 
+const dayName = i => (S.days[i] && S.days[i].name) || 'Session';
+
 function draftFor(p) {
   return S.draft.entries[p.slot] ||
     (S.draft.entries[p.slot] = { exId: p.exId, slot: p.slot, sets: [], pump: 0, readiness: 0, joint: null, done: false });
@@ -251,6 +263,15 @@ function liftRow(p, idx, week, preview) {
     ' \u00b7 ' + p.repLow + '\u2013' + p.repHigh + ' reps \u00b7 ' + nSets + ' set' + (nSets > 1 ? 's' : '')));
   row.append(body);
   row.append(el('span','spacer'));
+  if (!preview) {
+    const sw = el('button','rowswap');
+    sw.type = 'button';
+    sw.title = 'Swap ' + ex.name + ' for another lift that trains the same muscles';
+    sw.setAttribute('aria-label', sw.title);
+    sw.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11l-3-3M17 13H6l3 3"/></svg>';
+    sw.onclick = e => { e.stopPropagation(); openSwap(p, () => render()); };
+    row.append(sw);
+  }
   const st = el('span','lift-s');
   if (preview) st.textContent = '';
   else if (d.done) { st.classList.add('ok'); st.textContent = '\u2713'; }
@@ -655,8 +676,9 @@ function registerCustom() {
 }
 
 function finishSession() {
-  const letter = S.draft.letter;
-  const plan = S.plan[letter];
+  const dayIdx = S.draft.day;
+  const day = S.days[dayIdx];
+  const plan = day.slots;
   const entries = [], changes = [];
 
   plan.forEach((p, idx) => {
@@ -699,14 +721,15 @@ function finishSession() {
 
   if (!entries.length) { alert('Nothing logged yet.'); return; }
 
-  S.sessions.push({ date: today(), letter, week: S.week, entries });
+  S.sessions.push({ date: today(), day: dayIdx, name: day.name, week: S.week, entries });
   Object.keys(S.quarantine).forEach(id => { if (--S.quarantine[id] <= 0) delete S.quarantine[id]; });
-  S.next = letter === 'A' ? 'B' : 'A';
-  if (letter === 'B') S.week = S.week >= 5 ? 1 : S.week + 1;
+  const wasLast = dayIdx === S.days.length - 1;
+  S.cur = wasLast ? 0 : dayIdx + 1;
+  if (wasLast) S.week = S.week >= 5 ? 1 : S.week + 1;
   S.draft = null;
   save();
 
-  S.lastSummary = { date: today(), letter, week: S.week, lines: changes };
+  S.lastSummary = { date: today(), name: day.name, week: S.week, lines: changes };
   save();
   current = 'train'; window.scrollTo(0, 0); render();
 }
@@ -726,11 +749,124 @@ function slotHistory(slot) {
     .map(e => ({ loadProgressed: !!e.loadProgressed }));
 }
 
+/* ---- new mesocycle wizard ---- */
+const SLOT_MUSCLE = { squat:'Quads', hpress:'Chest', vpull:'Lats', hinge:'Hams & glutes',
+                      hpull:'Mid-back', vpress:'Delts', arms:'Arms', calves:'Calves', core:'Core' };
+
+function openMesoWizard() {
+  closeSheet();
+  let days = (S.setup && S.setup.days) || 2;
+  let minutes = (S.setup && S.setup.minutes) || 50;
+  let draft = null;
+
+  sheetEl = el('div','sheet');
+  sheetEl.setAttribute('role','dialog');
+  sheetEl.setAttribute('aria-modal','true');
+  sheetEl.setAttribute('aria-label','Build a new mesocycle');
+  sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
+  const inner = el('div','sheet-inner');
+  sheetEl.append(inner);
+  document.body.append(sheetEl);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onSheetKey);
+  draw();
+
+  function draw() {
+    draft = generatePlan({ days, minutes, goal: S.profile.goal }, EX, SUBS);
+    inner.innerHTML = '';
+
+    const head = el('div','sheet-h');
+    const t = el('div');
+    t.append(el('div','ex-slot','Five weeks, then a deload'));
+    t.append(Object.assign(el('h2'), { textContent: 'New mesocycle' }));
+    head.append(t); head.append(el('div','spacer'));
+    const x = el('button','btn sm ghost','Close');
+    x.onclick = () => { closeSheet(); render(); };
+    head.append(x);
+    inner.append(head);
+
+    inner.append(el('div','eyebrow','Days per week'));
+    const dr = el('div','opts triple');
+    [2,3,4,5].forEach(n => {
+      const b = el('button','opt', String(n)); b.type = 'button';
+      b.setAttribute('aria-pressed', String(days === n));
+      b.onclick = () => { days = n; draw(); };
+      dr.append(b);
+    });
+    inner.append(dr);
+
+    inner.append(el('div','eyebrow','Time per session'));
+    const mr = el('div','opts triple');
+    [30,45,60,75].forEach(n => {
+      const b = el('button','opt', n + ' min'); b.type = 'button';
+      b.setAttribute('aria-pressed', String(minutes === n));
+      b.onclick = () => { minutes = n; draw(); };
+      mr.append(b);
+    });
+    inner.append(mr);
+
+    // weekly hard sets, checked against the evidence range
+    const vol = weeklyVolume(draft, 3, setsForWeek);
+    inner.append(el('div','eyebrow','Hard sets per muscle, per week'));
+    inner.append(Object.assign(el('div','qs'), { textContent:
+      'At week 3, the middle of the block. Around ten or more per muscle is the range the research supports for growth. Below that maintains rather than builds.' }));
+    const vg = el('div','volgrid');
+    Object.entries(vol).sort((a, b) => b[1] - a[1]).forEach(([slot, n]) => {
+      const cell = el('div','volcell' + (n >= 10 ? ' good' : n >= 6 ? ' ok' : ' low'));
+      cell.append(Object.assign(el('span','volnum'), { textContent: String(n) }));
+      cell.append(Object.assign(el('span','vollbl'), { textContent: SLOT_MUSCLE[slot] || slot }));
+      vg.append(cell);
+    });
+    inner.append(vg);
+    const under = Object.entries(vol).filter(([, n]) => n < 10).length;
+    const verdict = el('div','alert ' + (under === 0 ? 'good' : under <= 3 ? 'warn' : 'bad'));
+    verdict.innerHTML = under === 0
+      ? '<b>Every muscle is in the growth range</b>This is a building programme.'
+      : '<b>' + under + ' muscle group' + (under === 1 ? '' : 's') + ' below ten sets</b>' +
+        (days <= 2
+          ? 'Two days a week cannot reach ten sets for everything without very long sessions. That is a real limit of the schedule, not a flaw in the plan. It will hold what you have and build the lagging areas slowly, which is a reasonable trade in a deficit.'
+          : 'Add a day or ten minutes and most of these clear the bar.');
+    inner.append(verdict);
+
+    inner.append(el('div','eyebrow','The sessions'));
+    draft.forEach(d => {
+      const card = el('div','daycard');
+      const h = el('div','row');
+      h.append(Object.assign(el('span','lift-n'), { textContent: d.name }));
+      h.append(el('span','spacer'));
+      h.append(Object.assign(el('span','lift-t'), { textContent: '~' + d.minutes + ' min \u00b7 ' + d.slots.length + ' lifts' }));
+      card.append(h);
+      d.slots.forEach(p2 => {
+        const r = el('div','planrow');
+        const b2 = el('span','lift-b');
+        b2.append(el('span','ex-slot', SLOTS.find(x => x.id === p2.slot).name));
+        b2.append(el('span','lift-n', byId(p2.exId).name));
+        r.append(b2);
+        card.append(r);
+      });
+      inner.append(card);
+    });
+
+    const go = el('button','btn primary block','Start this mesocycle');
+    go.style.marginTop = '14px';
+    go.onclick = () => {
+      if (!confirm('Replace your current programme and restart at week 1?\n\nLogged sessions and bodyweight history are kept.')) return;
+      S.days = draft.map(d => ({ name: d.name, slots: d.slots }));
+      S.setup = { days, minutes };
+      S.week = 1; S.cur = 0; S.draft = null; S.preview = null; S.lastSummary = null;
+      save(); closeSheet(); current = 'train'; render();
+    };
+    inner.append(go);
+    inner.append(Object.assign(el('p','tiny'), { textContent:
+      'Every lift can be swapped for another that trains the same muscles, and the order dragged around, once the block is running. Your logged history and weigh-ins are not touched.' }));
+  }
+}
+
 /* ---- week / session picker ---- */
 function openPlanPicker() {
   closeSheet();
   let week = S.preview ? S.preview.week : S.week;
-  let letter = S.preview ? S.preview.letter : S.next;
+  let dayIdx = S.preview ? S.preview.day : S.cur;
 
   sheetEl = el('div','sheet');
   sheetEl.setAttribute('role','dialog');
@@ -770,18 +906,18 @@ function openPlanPicker() {
 
     inner.append(el('div','eyebrow','Session'));
     const sr = el('div','opts triple');
-    ['A','B'].forEach(L => {
-      const b = el('button','opt', 'Session ' + L);
+    S.days.forEach((d, i) => {
+      const b = el('button','opt', d.name);
       b.type = 'button';
-      b.setAttribute('aria-pressed', String(letter === L));
-      b.onclick = () => { letter = L; draw(); };
+      b.setAttribute('aria-pressed', String(dayIdx === i));
+      b.onclick = () => { dayIdx = i; draw(); };
       sr.append(b);
     });
     inner.append(sr);
 
     inner.append(Object.assign(el('p','qs'), { textContent: weekBlurb(week) }));
     const list = el('div','planlist');
-    S.plan[letter].forEach((p, i) => {
+    S.days[dayIdx].slots.forEach((p, i) => {
       const r = el('div','planrow');
       r.append(el('span','lift-i', String(i + 1)));
       const b2 = el('span','lift-b');
@@ -796,19 +932,19 @@ function openPlanPicker() {
     });
     inner.append(list);
 
-    const isCurrent = week === S.week && letter === S.next;
+    const isCurrent = week === S.week && dayIdx === S.cur;
     const go = el('button','btn primary block',
       isCurrent ? 'This is your current session' : 'Preview this');
     go.disabled = isCurrent;
     go.style.marginTop = '14px';
-    go.onclick = () => { S.preview = { week, letter }; save(); closeSheet(); current = 'train'; render(); };
+    go.onclick = () => { S.preview = { week, day: dayIdx }; save(); closeSheet(); current = 'train'; render(); };
     inner.append(go);
 
     if (!isCurrent) {
       const set = el('button','btn block ghost','Make this my current session');
       set.style.marginTop = '8px';
       set.onclick = () => {
-        S.week = week; S.next = letter; S.preview = null; S.draft = null;
+        S.week = week; S.cur = dayIdx; S.preview = null; S.draft = null;
         save(); closeSheet(); current = 'train'; render();
       };
       inner.append(set);
@@ -1278,11 +1414,16 @@ views.settings = root => {
     b.setAttribute('aria-pressed', String(S.week === n));
     b.onclick = () => { S.week = n; save(); render(); }; r.append(b); });
   w.append(r);
-  const nr = el('div','row'); nr.style.marginTop = '10px';
-  ['A','B'].forEach(L => { const b = el('button','btn sm','Next: ' + L);
-    b.setAttribute('aria-pressed', String(S.next === L));
-    b.onclick = () => { S.next = L; S.draft = null; save(); render(); }; nr.append(b); });
-  w.append(nr);
+  w.append(Object.assign(el('p','tiny'), { textContent:
+    'Which session is next is set from the week badge at the top of the screen.' }));
+  const nm = el('button','btn primary block','Build a new mesocycle');
+  nm.style.marginTop = '12px';
+  nm.onclick = openMesoWizard;
+  w.append(nm);
+  w.append(Object.assign(el('p','tiny'), { textContent:
+    'Choose days per week and how long you have, and it builds the block around that. Currently ' +
+    ((S.setup && S.setup.days) || S.days.length) + ' days a week at about ' +
+    ((S.setup && S.setup.minutes) || 50) + ' minutes.' }));
   root.append(w);
 
   const d = el('div','card');

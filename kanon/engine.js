@@ -180,8 +180,79 @@ function lossFlag(pctPerWeek, lbPerWeek) {
 const round1 = v => Math.round(v * 10) / 10;
 const round2 = v => Math.round(v * 100) / 100;
 
+/* ---------- mesocycle generator ----------
+ * Day templates are ordered by priority, so trimming for a short session drops
+ * accessories before compounds. A slot may appear twice in a day (a lower day
+ * wants two quad and two hinge movements), and the generator gives each
+ * appearance a different exercise.
+ * Time model: ~7 min for a compound slot, ~5 for an isolation slot, at the set
+ * counts this programme uses, plus 8 minutes of warm-up. */
+const ISO_SLOTS = ['arms', 'calves', 'core'];
+const SLOT_MIN = slot => (ISO_SLOTS.includes(slot) ? 5 : 7);
+const WARMUP_MIN = 8;
+
+const TEMPLATES = {
+  2: [{ name: 'Full body A', slots: ['squat','hpress','vpull','hinge','hpull','vpress','squat','hpress','arms','arms','calves','core'] },
+      { name: 'Full body B', slots: ['hinge','vpress','hpull','squat','hpress','vpull','hinge','vpull','arms','arms','core','calves'] }],
+  3: [{ name: 'Full body A', slots: ['squat','hpress','vpull','hinge','vpress','squat','arms','arms','calves','core'] },
+      { name: 'Full body B', slots: ['hinge','vpull','hpress','squat','hpull','hinge','arms','arms','core','calves'] },
+      { name: 'Full body C', slots: ['squat','vpress','hpull','hinge','hpress','vpull','arms','arms','calves','core'] }],
+  4: [{ name: 'Upper A', slots: ['hpress','vpull','vpress','hpull','hpress','vpull','arms','arms','core'] },
+      { name: 'Lower A', slots: ['squat','hinge','squat','hinge','squat','calves','calves','core'] },
+      { name: 'Upper B', slots: ['vpull','hpress','hpull','vpress','vpull','hpress','arms','arms','core'] },
+      { name: 'Lower B', slots: ['hinge','squat','hinge','squat','hinge','calves','calves','core'] }],
+  5: [{ name: 'Upper A', slots: ['hpress','vpull','vpress','hpull','hpress','arms','arms','core'] },
+      { name: 'Lower A', slots: ['squat','hinge','squat','hinge','calves','core'] },
+      { name: 'Push',    slots: ['hpress','vpress','hpress','vpress','arms','arms','core'] },
+      { name: 'Pull',    slots: ['vpull','hpull','vpull','hpull','arms','arms','core'] },
+      { name: 'Legs',    slots: ['hinge','squat','hinge','squat','calves','calves','core'] }]
+};
+
+// Prefer a lift not already used this week, then the gentlest on the joints.
+function pickExercise(slot, used, EX, SUBS) {
+  const order = (SUBS[slot] || []).slice();
+  const pool = order.map(id => EX.find(e => e.id === id)).filter(Boolean);
+  if (!pool.length) return null;
+  return pool.find(e => !used.has(e.id)) || pool[0];
+}
+
+function generatePlan({ days, minutes, goal }, EX, SUBS) {
+  const tpl = TEMPLATES[days] || TEMPLATES[2];
+  const budget = Math.max(SLOT_MIN('squat'), minutes - WARMUP_MIN);
+  const used = new Set();
+  return tpl.map(day => {
+    let spent = 0;
+    const slots = [];
+    for (const slot of day.slots) {
+      const cost = SLOT_MIN(slot);
+      if (spent + cost > budget) break;
+      const ex = pickExercise(slot, used, EX, SUBS);
+      if (!ex) continue;
+      used.add(ex.id);
+      const iso = ISO_SLOTS.includes(slot);
+      slots.push({ slot, exId: ex.id, sets: 1,
+                   repLow: iso ? 10 : 8, repHigh: iso ? 15 : 12,
+                   load: null, misses: 0, primary: slots.length < 3 });
+      spent += cost;
+    }
+    return { name: day.name, slots, minutes: spent + WARMUP_MIN };
+  });
+}
+
+/* Weekly hard sets per slot at a given week, so the plan can be sanity-checked
+ * against the ~10-plus sets per muscle per week the evidence supports. */
+function weeklyVolume(sessions, week, setsForWeekFn) {
+  const out = {};
+  sessions.forEach(day => day.slots.forEach(p => {
+    const n = Math.max(p.sets, setsForWeekFn(week, p.primary));
+    out[p.slot] = (out[p.slot] || 0) + n;
+  }));
+  return out;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { nextLoad, volumeDecision, substitute, deloadCheck, navyBodyFat,
                      proteinTarget, waterTargetOz, weightTrend, lossFlag, roundTo,
+                     generatePlan, weeklyVolume, TEMPLATES, ISO_SLOTS,
                      RIR_BY_WEEK, DELOAD_WEEK, SETS_CAP_PER_SLOT };
 }
