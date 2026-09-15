@@ -576,18 +576,24 @@ views.daily = root => {
   vr.append(Object.assign(el('div','vessel-s'), { textContent:
     oz >= targetOz ? 'Target met. Stop counting and drink to thirst from here.'
     : Math.ceil((targetOz - oz) / 8) + ' more glasses to go' + (trainingDay ? ', training day included.' : '.') }));
-  const vb = el('div','vessel-btns');
-  const add = (label, glasses, cls) => {
-    const b = el('button','btn sm ' + (cls || ''), label);
-    b.onclick = () => { d.water = Math.max(0, d.water + glasses); save(); render(); };
-    return b;
-  };
-  vb.append(add('+8 oz', 1, 'primary'));
-  vb.append(add('+16 oz', 2));
-  vb.append(add('\u2212 8 oz', -1, 'ghost'));
-  vr.append(vb);
+  vr.append(Object.assign(el('div','vessel-h'), { textContent: 'Tap a cup for each 8 oz' }));
   ves.append(vr);
   c1.append(ves);
+
+  const cups = el('div','cups');
+  const nCups = Math.ceil(targetOz / 8);
+  for (let i = 0; i < nCups; i++) {
+    const on = i < d.water;
+    const b = el('button','cup' + (on ? ' full' : ''));
+    b.type = 'button';
+    b.innerHTML = kylix();
+    b.setAttribute('aria-label', 'Cup ' + (i + 1) + ' of ' + nCups + (on ? ', drunk' : ', not yet'));
+    b.setAttribute('aria-pressed', String(on));
+    // tapping a full cup empties back to it, so a mistap is one tap to undo
+    b.onclick = () => { d.water = on ? i : i + 1; save(); render(); };
+    cups.append(b);
+  }
+  c1.append(cups);
   c1.append(Object.assign(el('p','tiny'), { textContent:
     'The National Academies put adequate total water intake at 125 oz a day for men and 91 for women, across everything you eat and drink. About a fifth of that comes from food, so the target above is the drinkable share, plus 20 oz on a training day. It is a population figure, not a prescription: thirst and pale urine are still the better guides.' }));
   root.append(c1);
@@ -659,29 +665,43 @@ views.daily = root => {
   root.append(c4);
 };
 
+function kylix() {
+  return `<svg viewBox="0 0 28 30" aria-hidden="true">
+    <path d="M25.5 10.5 C29 12 28 16 25 17.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M2.5 10.5 C-1 12 0 16 3 17.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M3 9 H25 L21.5 19 Q14 23.5 6.5 19 Z" fill="currentColor" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+    <path d="M5 10.4 H23 L21 15 Q14 18 7 15 Z" fill="var(--spec)" opacity=".2"/>
+    <rect x="12.6" y="21.5" width="2.8" height="5" fill="currentColor"/>
+    <rect x="8" y="26" width="12" height="2.6" rx="1.2" fill="currentColor"/>
+  </svg>`;
+}
+
 function amphora(pct) {
-  const top = 34, bot = 110;                       // fillable range inside the vessel
+  const top = 36, bot = 116;
   const cl = Math.max(0, Math.min(1, pct));
   const y = bot - cl * (bot - top);
-  return `<svg viewBox="0 0 86 128" role="img" aria-label="Vessel filled to ${Math.round(cl*100)} percent of today's water target">
+  return `<svg viewBox="0 0 96 136" role="img" aria-label="Vessel filled to ${Math.round(cl*100)} percent of today's water target">
   <defs>
     <clipPath id="ampClip">
-      <ellipse cx="43" cy="72" rx="31" ry="37"/>
-      <rect x="36" y="10" width="14" height="30"/>
+      <ellipse cx="48" cy="78" rx="33" ry="39"/>
+      <rect x="40" y="14" width="16" height="32"/>
     </clipPath>
   </defs>
-  <path d="M50 16 C67 17 74 30 71 45" fill="none" stroke="var(--line)" stroke-width="4" stroke-linecap="round"/>
-  <path d="M36 16 C19 17 12 30 15 45" fill="none" stroke="var(--line)" stroke-width="4" stroke-linecap="round"/>
-  <ellipse cx="43" cy="72" rx="31" ry="37" fill="var(--surface2)"/>
-  <rect x="36" y="10" width="14" height="30" fill="var(--surface2)"/>
+  <ellipse cx="48" cy="128" rx="26" ry="4" fill="rgba(0,0,0,.22)"/>
+  <path d="M56 20 C75 22 82 36 78 52" fill="none" stroke="url(#gMetal)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M40 20 C21 22 14 36 18 52" fill="none" stroke="url(#gMetal)" stroke-width="6" stroke-linecap="round"/>
+  <ellipse cx="48" cy="78" rx="33" ry="39" fill="url(#gMetal)"/>
+  <rect x="40" y="14" width="16" height="32" fill="url(#gMetal)"/>
   <g clip-path="url(#ampClip)">
-    <rect x="0" y="${y}" width="86" height="${128 - y}" fill="var(--accent)" opacity=".8"/>
-    <rect x="0" y="${y}" width="86" height="1.6" fill="var(--accent)"/>
+    <rect x="0" y="0" width="96" height="136" fill="var(--ink)" filter="url(#fPatina)" opacity=".5"/>
+    <rect x="0" y="${y}" width="96" height="${136 - y}" fill="url(#gWater)"/>
+    <rect x="0" y="${y}" width="96" height="2" fill="var(--spec)" opacity=".55"/>
+    <ellipse cx="48" cy="78" rx="33" ry="39" fill="url(#gSpec)"/>
   </g>
-  <ellipse cx="43" cy="72" rx="31" ry="37" fill="none" stroke="var(--line)" stroke-width="2"/>
-  <rect x="36" y="10" width="14" height="30" fill="none" stroke="var(--line)" stroke-width="2"/>
-  <rect x="29" y="5" width="28" height="7" rx="2.5" fill="var(--surface2)" stroke="var(--line)" stroke-width="2"/>
-  <path d="M34 106 L52 106 L57 121 L29 121 Z" fill="var(--surface2)" stroke="var(--line)" stroke-width="2" stroke-linejoin="round"/>
+  <ellipse cx="48" cy="78" rx="33" ry="39" fill="none" stroke="var(--metal-lo)" stroke-width="1.5"/>
+  <rect x="40" y="14" width="16" height="32" fill="none" stroke="var(--metal-lo)" stroke-width="1.5"/>
+  <rect x="32" y="8" width="32" height="8" rx="3" fill="url(#gMetal)" stroke="var(--metal-lo)" stroke-width="1.5"/>
+  <path d="M38 112 L58 112 L64 128 L32 128 Z" fill="url(#gMetal)" stroke="var(--metal-lo)" stroke-width="1.5" stroke-linejoin="round"/>
 </svg>`;
 }
 
@@ -980,7 +1000,39 @@ views.settings = root => {
   root.append(a);
 };
 
+function metalDefs() {
+  if (document.getElementById('kanonDefs')) return;
+  const w = document.createElement('div');
+  w.id = 'kanonDefs';
+  w.setAttribute('aria-hidden', 'true');
+  w.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
+  w.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg"><defs>
+    <linearGradient id="gMetal" x1="0" y1="0" x2="0.85" y2="1">
+      <stop offset="0"    stop-color="var(--metal-hi)"/>
+      <stop offset="0.38" stop-color="var(--metal-mid)"/>
+      <stop offset="1"    stop-color="var(--metal-lo)"/>
+    </linearGradient>
+    <linearGradient id="gSpec" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0"    stop-color="var(--spec)" stop-opacity="0"/>
+      <stop offset="0.18" stop-color="var(--spec)" stop-opacity=".5"/>
+      <stop offset="0.34" stop-color="var(--spec)" stop-opacity="0"/>
+      <stop offset="1"    stop-color="var(--spec)" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="gWater" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--accent)" stop-opacity=".95"/>
+      <stop offset="1" stop-color="var(--accent)" stop-opacity=".62"/>
+    </linearGradient>
+    <filter id="fPatina" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" seed="7" result="n"/>
+      <feColorMatrix in="n" type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".16"/></feComponentTransfer>
+    </filter>
+  </defs></svg>`;
+  document.body.append(w);
+}
+
 /* ---------------- boot ---------------- */
+metalDefs();
 registerCustom();
 render();
 if ('serviceWorker' in navigator) {
