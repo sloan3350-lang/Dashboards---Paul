@@ -13,7 +13,7 @@ function seed() {
   const mk = (slot, exId, primary) => ({ slot, exId, sets: 1, repLow: 8, repHigh: 12,
                                          load: null, misses: 0, primary: !!primary });
   return {
-    profile: { sex:'male', age:44, heightIn:70, goal:'cut', appetiteSuppressed:true, theme:'dark',
+    profile: { sex:'male', age:44, heightIn:70, goal:'cut', appetiteSuppressed:true, theme:'dark', figure:'male',
                startWeight:219, targetWeight:207, trainDays:'Tue / Sat' },
     week: 1,
     cur: 0,
@@ -158,10 +158,16 @@ views.train = root => {
   const head = el('div','card hero');
   // The artwork is an optional asset: if img/hero.jpg is not published, onerror
   // strips the image and the card falls back to plain type with no broken icon.
-  const himg = el('img');
-  himg.src = 'img/hero.jpg'; himg.alt = ''; himg.loading = 'eager';
-  himg.onerror = () => { head.classList.add('noimg'); himg.remove(); };
-  head.append(himg);
+  const fig = S.profile.figure || 'male';
+  if (fig === 'none') {
+    head.classList.add('noimg');
+  } else {
+    const himg = el('img');
+    himg.src = 'img/hero-' + fig + '.jpg';
+    himg.alt = ''; himg.loading = 'eager';
+    himg.onerror = () => { head.classList.add('noimg'); himg.remove(); };
+    head.append(himg);
+  }
   const ov = el('div','hero-ov');
   ov.append(Object.assign(el('h2'), { textContent: day.name + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
   ov.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
@@ -272,12 +278,14 @@ function liftRow(p, idx, week, preview) {
     sw.onclick = e => { e.stopPropagation(); openSwap(p, () => render()); };
     row.append(sw);
   }
-  const st = el('span','lift-s');
-  if (preview) st.textContent = '';
-  else if (d.done) { st.classList.add('ok'); st.textContent = '\u2713'; }
-  else if (logged) { st.classList.add('part'); st.textContent = logged + '/' + nSets; }
-  else st.textContent = '\u2192';
-  row.append(st);
+  // Only show a status glyph when there is one. The grip and swap control
+  // already read as interactive, so a permanent arrow just stole width from
+  // the lift name and forced it onto two lines.
+  if (!preview && d && (d.done || logged)) {
+    const st = el('span','lift-s' + (d.done ? ' ok' : ' part'));
+    st.textContent = d.done ? '\u2713' : logged + '/' + nSets;
+    row.append(st);
+  }
   return row;
 }
 
@@ -1397,6 +1405,18 @@ views.settings = root => {
   });
   sel.onchange = () => { S.profile.goal = sel.value; save(); render(); };
   gw.append(sel); c.append(gw);
+
+  const fw = el('div'); fw.style.margin = '0 0 14px';
+  fw.append(el('div','lbl','Header figure'));
+  const fr = el('div','opts triple');
+  [['male','Male'],['female','Female'],['none','None']].forEach(([v, label]) => {
+    const b = el('button','opt', label); b.type = 'button';
+    b.setAttribute('aria-pressed', String((S.profile.figure || 'male') === v));
+    b.onclick = () => { S.profile.figure = v; save(); render(); };
+    fr.append(b);
+  });
+  fw.append(fr);
+  c.append(fw);
 
   const ap = el('button','opt');
   ap.setAttribute('aria-pressed', String(!!S.profile.appetiteSuppressed));

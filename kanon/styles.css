@@ -82,7 +82,7 @@ section{display:flex;flex-direction:column;gap:13px}
 
 /* ---------- lift list ---------- */
 .liftlist{padding:2px 6px}
-.lift{display:flex;align-items:center;gap:13px;width:100%;text-align:left;background:none;
+.lift{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;
       border:0;border-bottom:1px solid var(--line);padding:14px 10px;min-height:70px}
 .lift:last-child{border-bottom:0}
 .lift.done .lift-n{color:var(--muted)}
@@ -90,9 +90,10 @@ section{display:flex;flex-direction:column;gap:13px}
         width:18px;flex:none;text-align:center;font-variant-numeric:tabular-nums}
 .lift.done .lift-i{color:var(--muted)}
 .lift-b{display:flex;flex-direction:column;gap:3px;min-width:0}
-.lift-n{font-family:var(--serif);font-size:19px;font-weight:600;line-height:1.15}
+.lift-n{font-family:var(--serif);font-size:18px;font-weight:600;line-height:1.2;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lift-t{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.01em}
-.lift-s{font-size:16px;color:var(--muted);flex:none;width:30px;text-align:right}
+.lift-s{font-size:15px;color:var(--muted);flex:none;text-align:right;padding-left:2px}
 .lift-s.ok{color:var(--good);font-weight:700}
 .lift-s.part{font-size:12px;color:var(--accent);font-variant-numeric:tabular-nums;font-weight:600}
 .ex-slot{font-size:9px;letter-spacing:.17em;text-transform:uppercase;color:var(--muted)}
@@ -271,7 +272,82 @@ input[type=date]{text-align:left}
 .daycard .planrow{padding:8px 0;border-bottom:1px solid var(--line)}
 .daycard .planrow:last-child{border-bottom:0}
 .daycard .lift-n{font-size:15px}
-.rowswap{background:none;border:0;padding:0;width:40px;height:44px;flex:none;color:var(--muted);
+.rowswap{background:none;border:0;padding:0;width:34px;height:44px;flex:none;color:var(--muted);
          display:flex;align-items:center;justify-content:center;border-radius:7px}
 .rowswap svg{width:19px;height:19px}
 .rowswap:hover,.rowswap:focus-visible{color:var(--accent);background:var(--surface2)}
+
+/* ============================================================
+   GLASS LAYER
+   Frosted panels only read as glass if there is something behind
+   them to refract. So the page gets a lit ground: a red bloom, a
+   cool counter-light, soft blurred veining, and a fine grain.
+   Without that bed, backdrop-filter just renders flat grey.
+   ============================================================ */
+:root{
+  --glass:rgba(255,255,255,.055);
+  --glass-2:rgba(17,17,19,.52);
+  --glass-edge:rgba(255,255,255,.17);
+  --blur:20px; --sat:150%;
+  --veil:rgba(225,29,46,.16);
+  --veil-2:rgba(150,160,180,.10);
+  --grain:.085;
+}
+:root[data-theme="light"]{
+  --glass:rgba(255,255,255,.60);
+  --glass-2:rgba(255,255,255,.66);
+  --glass-edge:rgba(255,255,255,.95);
+  --blur:18px; --sat:130%;
+  --veil:rgba(200,16,46,.09);
+  --veil-2:rgba(90,100,120,.07);
+  --grain:.05;
+}
+
+body{
+  background:
+    radial-gradient(48% 34% at 10% 4%,  var(--veil),   transparent 60%),
+    radial-gradient(40% 30% at 92% 16%, var(--veil-2), transparent 62%),
+    radial-gradient(60% 45% at 72% 92%, var(--veil),   transparent 58%),
+    var(--bg);
+  background-attachment:fixed;
+}
+/* blurred veining — the thing the glass actually refracts */
+body::after{
+  content:"";position:fixed;inset:-25%;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(closest-side at 22% 28%, rgba(255,255,255,.10), transparent 70%),
+    radial-gradient(closest-side at 78% 66%, var(--veil), transparent 70%);
+  filter:blur(46px);
+}
+/* fine grain so large flat areas are not dead */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:var(--grain);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");
+}
+.top,main,.tabs,.sheet{position:relative;z-index:1}
+.top{z-index:20}.tabs{z-index:30}.sheet{z-index:60}
+
+.card,.sheet-inner,.tabs,.top,.stat,.volcell,.daycard,.sheetrow,.lastline{
+  background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02)),var(--glass-2);
+  border-top-color:var(--glass-edge);
+  -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat));
+  backdrop-filter:blur(var(--blur)) saturate(var(--sat));
+}
+.card,.sheet-inner{box-shadow:0 10px 34px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.10)}
+.top{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.01)),var(--glass-2),var(--glow)}
+.btn,input[type=number],input[type=text],input[type=date],select,.opt{
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.hero.noimg .hero-ov{background:linear-gradient(180deg,rgba(255,255,255,.05),transparent)}
+
+/* Safari/Firefox without backdrop-filter, and anyone who asked for less
+   transparency, get a solid panel instead of an unreadable wash. */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .card,.sheet-inner,.tabs,.top,.stat,.volcell,.daycard,.sheetrow,.lastline{
+    background:var(--surface);}
+}
+@media (prefers-reduced-transparency:reduce){
+  .card,.sheet-inner,.tabs,.top,.stat,.volcell,.daycard,.sheetrow,.lastline,
+  .btn,input,select,.opt{
+    background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none}
+  body::before,body::after{display:none}
+}
