@@ -967,16 +967,49 @@ views.settings = root => {
   const c = el('div','card');
   c.append(el('h2','','Profile'));
   const fields = [
-    ['age','Age','number'], ['heightIn','Height (in)','number'],
+    ['age','Age','number'],
     ['startWeight','Start weight (lb)','number'], ['targetWeight','Target weight (lb)','number']
   ];
-  fields.forEach(([k, label, type]) => {
-    const w = el('div'); w.style.margin = '0 0 10px';
+  const field = (k, label, type) => {
+    const w = el('div'); w.style.margin = '0 0 12px';
     w.append(el('div','lbl', label));
     const i = el('input'); i.type = type; i.value = S.profile[k];
+    i.id = 'pf-' + k;
+    i.setAttribute('aria-label', label);
     i.oninput = () => { S.profile[k] = Number(i.value); save(); };
-    w.append(i); c.append(w);
-  });
+    w.append(i); return w;
+  };
+  c.append(field('age', 'Age', 'number'));
+
+  // Height in feet and inches; heightIn stays the single stored value the
+  // Navy body-fat formula reads, so the split is presentation only.
+  const hw = el('div'); hw.style.margin = '0 0 12px';
+  hw.append(el('div','lbl','Height'));
+  const hr = el('div','row');
+  const total = Number(S.profile.heightIn) || 0;
+  const ft = el('input'); ft.type = 'number'; ft.min = '3'; ft.max = '8'; ft.inputMode = 'numeric';
+  ft.id = 'pf-ft'; ft.value = Math.floor(total / 12) || '';
+  ft.setAttribute('aria-label', 'Height, feet');
+  const inch = el('input'); inch.type = 'number'; inch.min = '0'; inch.max = '11'; inch.step = '0.5';
+  inch.inputMode = 'decimal'; inch.id = 'pf-in'; inch.value = round1(total % 12);
+  inch.setAttribute('aria-label', 'Height, inches');
+  const commit = () => {
+    let f = Number(ft.value) || 0, n = Number(inch.value) || 0;
+    if (n >= 12) { f += Math.floor(n / 12); n = round1(n % 12); ft.value = f; inch.value = n; }
+    S.profile.heightIn = round1(f * 12 + n);
+    save();
+    hnote.textContent = S.profile.heightIn ? S.profile.heightIn + ' in total' : '';
+  };
+  ft.oninput = commit; inch.oninput = commit;
+  const unit = t => Object.assign(el('span','lbl'), { textContent: t, style: 'letter-spacing:.1em' });
+  hr.append(ft, unit('ft'), inch, unit('in'));
+  hw.append(hr);
+  const hnote = el('p','tiny');
+  hnote.textContent = total ? round1(total) + ' in total' : '';
+  hw.append(hnote);
+  c.append(hw);
+
+  fields.slice(1).forEach(([k, label, type]) => c.append(field(k, label, type)));
   const gw = el('div'); gw.style.margin = '0 0 10px';
   gw.append(el('div','lbl','Goal'));
   const sel = el('select');
