@@ -103,16 +103,24 @@ views.train = root => {
 
   if (!S.draft || S.draft.letter !== letter) S.draft = { letter, date: today(), week: S.week, entries: {} };
 
-  const head = el('div','card');
-  head.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
-  head.append(Object.assign(el('p','hint'), { textContent: weekBlurb() }));
+  const head = el('div','card hero');
+  // The artwork is an optional asset: if img/hero.jpg is not published, onerror
+  // strips the image and the card falls back to plain type with no broken icon.
+  const himg = el('img');
+  himg.src = 'img/hero.jpg'; himg.alt = ''; himg.loading = 'eager';
+  himg.onerror = () => { head.classList.add('noimg'); himg.remove(); };
+  head.append(himg);
+  const ov = el('div','hero-ov');
+  ov.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
+  ov.append(Object.assign(el('p','hint'), { textContent: weekBlurb() }));
+  head.append(ov);
   if (dl.deload && S.week !== 5) {
     const a = el('div','alert warn');
     a.innerHTML = '<b>Early deload recommended</b>' + esc(dl.reason) + '. Cut the sets in half and back off the effort this session.';
-    head.append(a);
+    ov.append(a);
   }
   const doneN = plan.filter(p => S.draft.entries[p.slot] && S.draft.entries[p.slot].done).length;
-  head.append(Object.assign(el('p','tiny'), { textContent:
+  ov.append(Object.assign(el('p','tiny'), { textContent:
     doneN ? doneN + ' of ' + plan.length + ' done. Take them in whatever order the machines are free.'
           : 'Take them in whatever order the machines are free. Tap a lift to log it.' }));
   root.append(head);
