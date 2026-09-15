@@ -289,8 +289,11 @@ function openLift(p, idx) {
     const hdr = el('div','setrow');
     hdr.append(el('div','n',''), el('div','lbl','Weight'), el('div','lbl','Reps'), el('div','lbl','Left in tank'), el('div',null,''));
     inner.append(hdr);
-    for (let i = 0; i < nSets; i++) {
-      if (!d.sets[i]) d.sets[i] = { load: p.load || '', reps: '', rir: '' };
+    // Planned rows come from the programme; anything past that is one you added
+    // by hand this session and can drop again.
+    const shown = Math.max(nSets, d.sets.length);
+    for (let i = 0; i < shown; i++) {
+      if (!d.sets[i]) d.sets[i] = { load: lastLoggedLoad(d, p), reps: '', rir: '' };
       const r = el('div','setrow');
       r.append(el('div','n', String(i + 1)));
       ['load','reps','rir'].forEach(f => {
@@ -302,9 +305,31 @@ function openLift(p, idx) {
         inp.oninput = () => { d.sets[i][f] = inp.value === '' ? '' : Number(inp.value); save(); next.disabled = !anyReps(); };
         r.append(inp);
       });
-      r.append(el('div',null,''));
+      if (i >= nSets) {
+        const rm = el('button','setdrop', '\u00d7');
+        rm.type = 'button';
+        rm.title = 'Remove set ' + (i + 1);
+        rm.setAttribute('aria-label', rm.title);
+        rm.onclick = () => { d.sets.splice(i, 1); save(); drawStep(); };
+        r.append(rm);
+      } else {
+        r.append(el('div',null,''));
+      }
       inner.append(r);
     }
+
+    const addBtn = el('button','btn sm block ghost','+ Add set');
+    addBtn.style.marginTop = '2px';
+    addBtn.onclick = () => {
+      d.sets.push({ load: lastLoggedLoad(d, p), reps: '', rir: '' });
+      save(); drawStep();
+    };
+    inner.append(addBtn);
+    inner.append(Object.assign(el('p','tiny'), { textContent:
+      shown > nSets
+        ? 'Extra sets count toward this session and the engine reads them, but they do not change the planned volume. That still moves only when a lift stalls.'
+        : 'The programme calls for ' + nSets + (nSets === 1 ? ' set' : ' sets') + ' here. Add more if you want them.' }));
+
     const next = el('button','btn primary block','Next');
     next.style.marginTop = '14px';
     next.disabled = !anyReps();
@@ -312,6 +337,15 @@ function openLift(p, idx) {
     inner.append(next);
     inner.append(Object.assign(el('p','tiny'), { textContent:
       'Log at least one set to carry on. Three short questions follow, one at a time.' }));
+  }
+
+  // A new row starts at the weight you last actually used, not a blank box.
+  function lastLoggedLoad(draft, plan) {
+    for (let i = draft.sets.length - 1; i >= 0; i--) {
+      const v = Number(draft.sets[i].load);
+      if (v > 0) return v;
+    }
+    return plan.load || '';
   }
 
   function anyReps() { return d.sets.some(x => x.reps !== '' && Number(x.reps) > 0); }
