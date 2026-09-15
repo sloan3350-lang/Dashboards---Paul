@@ -76,7 +76,9 @@ ok('protein target lands near the evidence plateau, not a made-up 1g/lb',
    p.target >= 160 && p.target <= 180);
 ok('suppressed appetite gives a reachable floor below the target',
    p.floor >= 120 && p.floor < p.target);
-eq('water target for 214.6 lb on a training day', E.waterTargetOz(214.6, true), 123);
+eq('water: IOM adequate intake for men, drinkable share, rest day', E.waterTargetOz('male', false), 100);
+eq('water: plus 20 oz on a training day', E.waterTargetOz('male', true), 120);
+eq('water: women\'s adequate intake is lower', E.waterTargetOz('female', false), 73);
 
 console.log('\nWEIGHT TREND');
 const wt = E.weightTrend([

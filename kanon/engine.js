@@ -129,8 +129,18 @@ function proteinTarget({ weightLb, age, sex, goal, appetiteSuppressed }) {
            kg: round1(kg) };
 }
 
-function waterTargetOz(weightLb, trainingDay) {
-  return Math.round(weightLb * 0.5) + (trainingDay ? 16 : 0);
+/* National Academies (IOM, 2004) adequate intake for TOTAL water is 3.7 L/day
+ * for men and 2.7 L/day for women from all sources, of which roughly 20% comes
+ * from food. So the drinkable share is ~100 oz for men, ~73 oz for women. This
+ * replaces the "half an ounce per pound of bodyweight" rule, which is folklore
+ * with no basis in the DRI. Exercise adds to it; ACSM frames replacement by
+ * sweat loss, and 20 oz is a reasonable flat stand-in for a 45-60 min session.
+ * The AI is a population figure, not an individual prescription: thirst and
+ * urine colour remain the real guides. */
+function waterTargetOz(sex, trainingDay) {
+  const totalOz = sex === 'female' ? 91 : 125;
+  const fromDrinks = Math.round(totalOz * 0.8);
+  return fromDrinks + (trainingDay ? 20 : 0);
 }
 
 /* ---------- weight trend ---------- */

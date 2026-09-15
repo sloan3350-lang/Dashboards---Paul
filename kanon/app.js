@@ -26,7 +26,7 @@ function seed() {
       '2026-08-31': { water:0, sleep:7,  protein:'', weight:215.5 },
       '2026-09-07': { water:0, sleep:'', protein:'', weight:214.6 }
     },
-    measure: [],
+    measure: [], lastSummary: null,
     draft: null
   };
 }
@@ -84,22 +84,50 @@ views.train = root => {
   const plan = S.plan[letter];
   const dl = deloadCheckLocal();
 
+  if (!S.draft || S.draft.letter !== letter) S.draft = { letter, date: today(), week: S.week, entries: {} };
+
   const head = el('div','card');
-  head.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' · ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
+  head.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
   head.append(Object.assign(el('p','hint'), { textContent: weekBlurb() }));
   if (dl.deload && S.week !== 5) {
     const a = el('div','alert warn');
     a.innerHTML = '<b>Early deload recommended</b>' + esc(dl.reason) + '. Cut the sets in half and back off the effort this session.';
     head.append(a);
   }
+  const doneN = plan.filter(p => S.draft.entries[p.slot] && S.draft.entries[p.slot].done).length;
+  head.append(Object.assign(el('p','tiny'), { textContent:
+    doneN ? doneN + ' of ' + plan.length + ' done. Take them in whatever order the machines are free.'
+          : 'Take them in whatever order the machines are free. Tap a lift to log it.' }));
   root.append(head);
 
-  if (!S.draft || S.draft.letter !== letter) S.draft = { letter, date: today(), week: S.week, entries: {} };
+  if (S.lastSummary && S.lastSummary.lines && S.lastSummary.lines.length) {
+    const sum = el('div','card summary');
+    const sh = el('div','row');
+    sh.append(Object.assign(el('h2'), { textContent: 'What the last session changed' }));
+    sh.append(el('div','spacer'));
+    const dis = el('button','btn sm ghost','Dismiss');
+    dis.onclick = () => { S.lastSummary = null; save(); render(); };
+    sh.append(dis);
+    sum.append(sh);
+    sum.append(Object.assign(el('p','hint'), { textContent:
+      'Session ' + S.lastSummary.letter + ', week ' + S.lastSummary.week + ', ' + S.lastSummary.date +
+      '. These carried straight into the targets below.' }));
+    const ul = el('div','changes');
+    S.lastSummary.lines.forEach(l => {
+      const li = el('div','change');
+      li.append(el('span','change-b', '\u2192'));
+      li.append(el('span', null, l));
+      ul.append(li);
+    });
+    sum.append(ul);
+    root.append(sum);
+  }
 
-  plan.forEach((p, idx) => root.append(exerciseCard(p, idx, letter)));
+  const list = el('div','card liftlist');
+  plan.forEach((p, idx) => list.append(liftRow(p, idx)));
+  root.append(list);
 
   const fin = el('button','btn primary block','Finish session');
-  fin.style.marginTop = '4px';
   fin.onclick = finishSession;
   root.append(fin);
 
@@ -117,115 +145,208 @@ function weekBlurb() {
   return 'Two sets a slot, ' + rir + ' reps left in the tank. The engine adds a third only if a lift stalls.';
 }
 
-function deloadCheckLocal() {
-  return deloadCheck(S.week, deloadSignals());
+function deloadCheckLocal() { return deloadCheck(S.week, deloadSignals()); }
+
+function draftFor(p) {
+  return S.draft.entries[p.slot] ||
+    (S.draft.entries[p.slot] = { exId: p.exId, slot: p.slot, sets: [], pump: 0, readiness: 0, joint: null, done: false });
 }
 
-function exerciseCard(p, idx, letter) {
+function liftRow(p, idx) {
   const ex = byId(p.exId);
+  const d = draftFor(p);
   const nSets = Math.max(p.sets, setsForWeek(S.week, idx));
-  const rir = rirForWeek(S.week);
-  const d = S.draft.entries[p.slot] || (S.draft.entries[p.slot] = { exId: p.exId, slot: p.slot, sets: [], pump: 0, readiness: 0, joint: null });
+  const logged = d.sets.filter(x => x.reps).length;
 
-  const card = el('div','ex');
-  const h = el('div','ex-h');
-  const names = el('div');
-  names.append(el('div','ex-slot', SLOTS.find(s => s.id === p.slot).name));
-  names.append(el('div','ex-name', ex.name));
-  h.append(names);
-  h.append(el('div','spacer'));
-  const vid = el('a','btn sm ghost','Form');
-  vid.href = ex.video; vid.target = '_blank'; vid.rel = 'noopener';
-  vid.style.textDecoration = 'none';
-  h.append(vid);
-  const swap = el('button','btn sm ghost','Swap');
-  swap.onclick = () => openSwap(p, letter);
-  h.append(swap);
-  card.append(h);
+  const row = el('button','lift' + (d.done ? ' done' : ''));
+  row.type = 'button';
+  row.onclick = () => openLift(p, idx);
 
-  const b = el('div','ex-b');
-  const t = el('div','target');
-  t.innerHTML = p.load
-    ? `Target <b>${p.load} lb</b> &middot; ${p.repLow}–${p.repHigh} reps &middot; leave <b>${rir}</b> in the tank &middot; ${nSets} set${nSets>1?'s':''}`
-    : `<b>Finder set.</b> Pick a weight you could get about ${p.repHigh + 3} reps with, stop at ${p.repHigh}. Log what you used and the engine takes it from here.`;
-  b.append(t);
-  b.append(el('div','cue', ex.cue));
+  row.append(el('span','lift-i', String(idx + 1)));
+  const body = el('span','lift-b');
+  body.append(el('span','ex-slot', SLOTS.find(s => s.id === p.slot).name));
+  body.append(el('span','lift-n', ex.name));
+  body.append(el('span','lift-t', (p.load ? p.load + ' lb' : 'Finder set') +
+    ' \u00b7 ' + p.repLow + '\u2013' + p.repHigh + ' reps \u00b7 ' + nSets + ' set' + (nSets > 1 ? 's' : '')));
+  row.append(body);
+  row.append(el('span','spacer'));
+  const st = el('span','lift-s');
+  if (d.done) { st.classList.add('ok'); st.textContent = '\u2713'; }
+  else if (logged) { st.classList.add('part'); st.textContent = logged + '/' + nSets; }
+  else st.textContent = '\u2192';
+  row.append(st);
+  return row;
+}
 
-  const hdr = el('div','setrow');
-  hdr.append(el('div','n',''), el('div','lbl','Weight'), el('div','lbl','Reps'), el('div','lbl','Left in tank'), el('div',null,''));
-  b.append(hdr);
+/* ---- one lift at a time: log the sets, then the questions in sequence ---- */
+function openLift(p, idx) {
+  closeSheet();
+  const d = draftFor(p);
+  let step = 0;                       // 0 sets · 1 engagement · 2 recovery · 3 joint
 
-  for (let i = 0; i < nSets; i++) {
-    if (!d.sets[i]) d.sets[i] = { load: p.load || '', reps: '', rir: '' };
-    const r = el('div','setrow');
-    r.append(el('div','n', String(i + 1)));
-    ['load','reps','rir'].forEach(f => {
-      const inp = el('input'); inp.type = 'number'; inp.inputMode = 'decimal';
-      inp.value = d.sets[i][f]; inp.min = '0';
-      inp.placeholder = f === 'load' ? 'lb' : f === 'reps' ? '#' : 'RIR';
-      inp.oninput = () => { d.sets[i][f] = inp.value === '' ? '' : Number(inp.value); save(); };
-      r.append(inp);
+  sheetEl = el('div','sheet');
+  sheetEl.setAttribute('role','dialog');
+  sheetEl.setAttribute('aria-modal','true');
+  sheetEl.setAttribute('aria-label','Log lift');
+  sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
+  const inner = el('div','sheet-inner');
+  sheetEl.append(inner);
+  document.body.append(sheetEl);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onSheetKey);
+  drawStep();
+
+  function drawStep() {
+    const ex = byId(p.exId);
+    const nSets = Math.max(p.sets, setsForWeek(S.week, idx));
+    const rir = rirForWeek(S.week);
+    inner.innerHTML = '';
+
+    const head = el('div','sheet-h');
+    const ttl = el('div');
+    ttl.append(el('div','ex-slot', SLOTS.find(s => s.id === p.slot).name));
+    ttl.append(Object.assign(el('h2'), { textContent: ex.name }));
+    head.append(ttl);
+    head.append(el('div','spacer'));
+    const x = el('button','btn sm ghost','Close');
+    x.onclick = () => { closeSheet(); render(); };
+    head.append(x);
+    inner.append(head);
+
+    const dots = el('div','steps');
+    ['Sets','Muscle','Recovery','Joints'].forEach((label, i) => {
+      const dd = el('span','step' + (i === step ? ' on' : i < step ? ' past' : ''), label);
+      dots.append(dd);
     });
-    r.append(el('div',null,''));
-    b.append(r);
+    inner.append(dots);
+
+    if (step === 0) drawSets(ex, nSets, rir);
+    if (step === 1) drawQ('How much did the muscle do?',
+      'Barely means the joints took over. Too much means it cramped or gave out before the reps did.',
+      [[1,'Barely'],[2,'Moderate'],[3,'Strong'],[4,'Too much']],
+      d.pump, v => { d.pump = v; save(); step = 2; drawStep(); });
+    if (step === 2) drawQ('How recovered were you coming in?',
+      'Leftover soreness from last time, not how this set felt. Too sore means this should not have been trained today.',
+      [[1,'Fresh'],[2,'Slight'],[3,'Still sore'],[4,'Too sore']],
+      d.readiness, v => { d.readiness = v; save(); step = 3; drawStep(); });
+    if (step === 3) drawJoint(ex);
   }
 
-  /* --- feedback, worded the way you asked --- */
-  const fb = el('div','fb');
-
-  fb.append(el('div','q','How much did the muscle actually do?'));
-  fb.append(optGroup([
-    [1,'Barely felt it, the joints or something else took over'],
-    [2,'Felt it working, had more in me'],
-    [3,'Full and working hard by the last rep'],
-    [4,'Cramped or gave out before the reps did']
-  ], d.pump, v => { d.pump = v; save(); }));
-
-  fb.append(el('div','q','How recovered were you coming in?'));
-  fb.append(Object.assign(el('div','qs'), { textContent: 'About leftover soreness from last time, not how this set felt.' }));
-  fb.append(optGroup([
-    [1,'Fresh, nothing left over'],
-    [2,'Slightly tender, did not limit anything'],
-    [3,'Still sore, it limited this set'],
-    [4,'Too sore, this should not have been trained today']
-  ], d.readiness, v => { d.readiness = v; save(); }));
-
-  fb.append(el('div','q','Any joint pain?'));
-  fb.append(Object.assign(el('div','qs'), { textContent: 'Muscle burn is fine. Joints are not. Two means we swap it now, not later.' }));
-  const jsev = optGroup([
-    [0,'None'],
-    [1,'Mild familiar ache, movement stayed clean'],
-    [2,'Sharp, pinching or wrong. Swap it.']
-  ], d.joint ? d.joint.sev : 0, v => {
-    d.joint = v === 0 ? null : { sev: v, joint: (d.joint && d.joint.joint) || 'shoulder' };
-    save(); render();
-  }, true);
-  fb.append(jsev);
-
-  if (d.joint) {
-    fb.append(Object.assign(el('div','qs'), { textContent: 'Which joint?' }));
-    const grid = el('div','jointgrid');
-    JOINTS.forEach(j => {
-      const o = el('button','opt'); o.type = 'button';
-      o.textContent = j === 'lowback' ? 'low back' : j;
-      o.setAttribute('aria-pressed', String(d.joint.joint === j));
-      o.onclick = () => { d.joint.joint = j; save(); render(); };
-      grid.append(o);
-    });
-    fb.append(grid);
-    if (d.joint.sev >= 2) {
-      const sub = substitute(p.exId, d.joint.joint, Object.keys(S.quarantine), EX, SUBS);
-      const a = el('div','alert bad');
-      a.innerHTML = sub
-        ? `<b>Swapping this lift</b>${esc(ex.name)} is out for the next 3 sessions. Same slot, less ${esc(d.joint.joint === 'lowback' ? 'low back' : d.joint.joint)}: <b>${esc(sub.name)}</b>. Finish the session and it will be waiting next time.`
-        : `<b>Nothing left to swap to in this slot</b>Drop this slot for now. If it still hurts in a week, get it looked at.`;
-      fb.append(a);
+  function drawSets(ex, nSets, rir) {
+    const t = el('div','target');
+    t.innerHTML = p.load
+      ? `Target <b>${p.load} lb</b> &middot; ${p.repLow}\u2013${p.repHigh} reps &middot; leave <b>${rir}</b> in the tank`
+      : `<b>Finder set.</b> Pick a weight you could get about ${p.repHigh + 3} reps with and stop at ${p.repHigh}. The engine takes over from the next session.`;
+    inner.append(t);
+    const L = lastFor(p.slot, p.exId);
+    if (L) {
+      const hist = el('div','lastline');
+      const setTxt = L.sets.map(x => x.load + '\u00d7' + x.reps).join(', ');
+      hist.innerHTML = '<b>Last time</b> ' + esc(L.date) + ' \u00b7 ' + esc(setTxt) +
+        ' \u00b7 ' + esc(String(L.sets[L.sets.length - 1].rir)) + ' in the tank' +
+        (L.note ? '<br><span class="why">' + esc(L.note) + '</span>' : '');
+      inner.append(hist);
     }
+    inner.append(el('div','cue', ex.cue));
+
+    const tools = el('div','row');
+    const vid = el('a','btn sm ghost','How to \u2197');
+    vid.href = ex.video; vid.target = '_blank'; vid.rel = 'noopener';
+    vid.title = 'Technique videos for ' + ex.name + ' (opens YouTube in a new tab)';
+    vid.setAttribute('aria-label', vid.title);
+    tools.append(vid);
+    const sw = el('button','btn sm ghost','Swap lift');
+    sw.title = 'Replace this with another lift that trains the same muscles';
+    sw.onclick = () => openSwap(p, () => openLift(p, idx));
+    tools.append(sw);
+    inner.append(tools);
+
+    const hdr = el('div','setrow');
+    hdr.append(el('div','n',''), el('div','lbl','Weight'), el('div','lbl','Reps'), el('div','lbl','Left in tank'), el('div',null,''));
+    inner.append(hdr);
+    for (let i = 0; i < nSets; i++) {
+      if (!d.sets[i]) d.sets[i] = { load: p.load || '', reps: '', rir: '' };
+      const r = el('div','setrow');
+      r.append(el('div','n', String(i + 1)));
+      ['load','reps','rir'].forEach(f => {
+        const inp = el('input'); inp.type = 'number'; inp.inputMode = 'decimal';
+        inp.min = '0'; inp.value = d.sets[i][f];
+        inp.id = 'set-' + p.slot + '-' + i + '-' + f;
+        inp.placeholder = f === 'load' ? 'lb' : f === 'reps' ? '#' : 'RIR';
+        inp.setAttribute('aria-label', 'Set ' + (i + 1) + ' ' + (f === 'load' ? 'weight' : f === 'reps' ? 'reps' : 'reps left in the tank'));
+        inp.oninput = () => { d.sets[i][f] = inp.value === '' ? '' : Number(inp.value); save(); next.disabled = !anyReps(); };
+        r.append(inp);
+      });
+      r.append(el('div',null,''));
+      inner.append(r);
+    }
+    const next = el('button','btn primary block','Next');
+    next.style.marginTop = '14px';
+    next.disabled = !anyReps();
+    next.onclick = () => { step = 1; drawStep(); };
+    inner.append(next);
+    inner.append(Object.assign(el('p','tiny'), { textContent:
+      'Log at least one set to carry on. Three short questions follow, one at a time.' }));
   }
 
-  b.append(fb);
-  card.append(b);
-  return card;
+  function anyReps() { return d.sets.some(x => x.reps !== '' && Number(x.reps) > 0); }
+
+  function drawQ(q, sub, opts, val, pick) {
+    inner.append(el('div','q', q));
+    inner.append(Object.assign(el('div','qs'), { textContent: sub }));
+    const g = optGroup(opts, val, pick);
+    g.classList.add('triple');
+    inner.append(g);
+    const back = el('button','btn sm ghost','Back');
+    back.onclick = () => { step--; drawStep(); };
+    inner.append(back);
+  }
+
+  function drawJoint(ex) {
+    inner.append(el('div','q','Any joint pain?'));
+    inner.append(Object.assign(el('div','qs'), { textContent:
+      'Muscle burn is fine. Joints are not. Two means we swap it now, not later.' }));
+    const sev = optGroup([[0,'None'],[1,'Mild'],[2,'Sharp']],
+      d.joint ? d.joint.sev : 0, v => {
+        d.joint = v === 0 ? null : { sev: v, joint: (d.joint && d.joint.joint) || null };
+        save(); drawStep();
+      }, true);
+    sev.classList.add('triple');
+    inner.append(sev);
+
+    if (d.joint) {
+      inner.append(Object.assign(el('div','qs'), { textContent: 'Which joint?' }));
+      const grid = el('div','jointgrid');
+      JOINTS.forEach(j => {
+        const o = el('button','opt'); o.type = 'button';
+        o.textContent = jointName(j);
+        o.setAttribute('aria-pressed', String(d.joint.joint === j));
+        o.onclick = () => { d.joint.joint = j; save(); drawStep(); };
+        grid.append(o);
+      });
+      inner.append(grid);
+      if (d.joint.sev >= 2 && d.joint.joint) {
+        const sub = substitute(p.exId, d.joint.joint, Object.keys(S.quarantine), EX, SUBS);
+        const a = el('div','alert bad');
+        a.innerHTML = sub
+          ? `<b>Swapping this lift</b>${esc(ex.name)} is out for the next 3 sessions. Same slot, less ${esc(jointName(d.joint.joint))}: <b>${esc(sub.name)}</b>. It comes back for a retest after that.`
+          : `<b>Nothing left to swap to in this slot</b>Drop this slot for now. If it still hurts in a week, get it looked at.`;
+        inner.append(a);
+      }
+    }
+
+    const ready = !d.joint || !!d.joint.joint;
+    const done = el('button','btn primary block','Done with this lift');
+    done.style.marginTop = '8px';
+    done.disabled = !ready;
+    done.onclick = () => { d.done = true; save(); closeSheet(); render(); };
+    inner.append(done);
+    if (!ready) inner.append(Object.assign(el('p','tiny'), { textContent: 'Pick which joint first.' }));
+    const back = el('button','btn sm ghost','Back');
+    back.style.marginTop = '8px';
+    back.onclick = () => { step = 2; drawStep(); };
+    inner.append(back);
+  }
 }
 
 function optGroup(opts, val, onPick, danger) {
@@ -242,16 +363,122 @@ function optGroup(opts, val, onPick, danger) {
   return g;
 }
 
-function openSwap(p, letter) {
-  const order = SUBS[p.slot] || [];
-  const names = order.map((id, i) => `${i + 1}. ${byId(id).name}`).join('\n');
-  const pick = prompt(`Swap ${byId(p.exId).name}\n\n${names}\n\nEnter a number:`);
-  const i = Number(pick) - 1;
-  if (order[i]) {
-    p.exId = order[i]; p.load = null; p.misses = 0;
-    if (S.draft && S.draft.entries[p.slot]) delete S.draft.entries[p.slot];
-    save(); render();
-  }
+const jointName = j => j === 'lowback' ? 'low back' : j;
+function jointSummary(ex) {
+  const cost = j => (ex.joints && ex.joints[j]) || 0;
+  const hi = JOINTS.filter(j => cost(j) === 2);
+  const mod = JOINTS.filter(j => cost(j) === 1);
+  if (hi.length) return 'Demanding on the ' + hi.map(jointName).join(' and ');
+  if (mod.length) return 'Moderate on the ' + mod.map(jointName).join(', ');
+  return 'Low joint stress';
+}
+
+function applySwap(p, exId, onDone) {
+  p.exId = exId; p.load = null; p.misses = 0;
+  if (S.draft && S.draft.entries[p.slot]) delete S.draft.entries[p.slot];
+  save(); closeSheet();
+  if (onDone) onDone(); else render();
+}
+
+let sheetEl = null;
+function closeSheet() {
+  if (sheetEl) { sheetEl.remove(); sheetEl = null; document.body.style.overflow = ''; }
+  document.removeEventListener('keydown', onSheetKey);
+}
+function onSheetKey(e) { if (e.key === 'Escape') closeSheet(); }
+
+function openSwap(p, onDone) {
+  closeSheet();
+  const slot = SLOTS.find(s => s.id === p.slot);
+  const order = (SUBS[p.slot] || []).slice();
+  // any custom lifts the user added to this slot, even if not in the preference list
+  EX.filter(e => e.slot === p.slot && !order.includes(e.id)).forEach(e => order.push(e.id));
+
+  sheetEl = el('div','sheet');
+  sheetEl.setAttribute('role','dialog');
+  sheetEl.setAttribute('aria-modal','true');
+  sheetEl.setAttribute('aria-label','Swap exercise');
+  sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); if (onDone) onDone(); else render(); } };
+
+  const inner = el('div','sheet-inner');
+  const head = el('div','sheet-h');
+  const ttl = el('div');
+  ttl.append(el('div','ex-slot', slot.name + ' \u00b7 ' + slot.muscles.join(', ')));
+  ttl.append(Object.assign(el('h2'), { textContent: 'Swap this lift' }));
+  head.append(ttl);
+  head.append(el('div','spacer'));
+  const x = el('button','btn sm ghost','Back');
+  x.onclick = () => { closeSheet(); if (onDone) onDone(); else render(); };
+  head.append(x);
+  inner.append(head);
+  inner.append(Object.assign(el('p','hint'), { textContent:
+    'Everything here trains the same muscles. Listed gentlest on the joints first, so if something hurts, work down from the top.' }));
+
+  order.forEach(id => {
+    const cand = byId(id);
+    if (!cand) return;
+    const isCur = id === p.exId;
+    const rest = S.quarantine[id];
+    const row = el('button','sheetrow' + (isCur ? ' cur' : ''));
+    row.type = 'button';
+    row.disabled = !!rest;
+    const left = el('div');
+    left.append(el('div','sheetrow-n', cand.name));
+    left.append(el('div','sheetrow-m',
+      rest ? 'Resting ' + rest + ' more session' + (rest > 1 ? 's' : '') + ' after a joint flag'
+           : jointSummary(cand)));
+    row.append(left);
+    row.append(el('div','spacer'));
+    if (isCur) row.append(el('span','badge','Current'));
+    else if (!rest) row.append(el('span','chev','\u2192'));
+    if (!isCur && !rest) row.onclick = () => applySwap(p, id, onDone);
+    inner.append(row);
+  });
+
+  // --- custom lift ---
+  const cwrap = el('div','custom');
+  cwrap.append(el('div','q','Not on the list?'));
+  cwrap.append(Object.assign(el('div','qs'), { textContent:
+    'Type whatever the machine is actually called at Crunch. It joins this slot permanently and progresses like any other lift.' }));
+  const crow = el('div','row');
+  const ci = el('input'); ci.type = 'text'; ci.placeholder = 'e.g. Hammer Strength iso row';
+  ci.style.textAlign = 'left'; ci.id = 'customLift';
+  ci.setAttribute('aria-label','Name of your own exercise');
+  crow.append(ci);
+  const cb = el('button','btn primary sm','Add');
+  cb.onclick = () => {
+    const name = ci.value.trim();
+    if (!name) { ci.focus(); return; }
+    const id = 'c_' + name.toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,28) + '_' + Date.now().toString(36).slice(-4);
+    const custom = { id, slot: p.slot, name, inc: 5, custom: true,
+                     joints: { shoulder:1, elbow:1, wrist:1, lowback:1, hip:1, knee:1 },
+                     cue: 'Your lift. Same rules: control the weight, stop the set at the target reps left in the tank.',
+                     video: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' proper form') };
+    S.custom = S.custom || [];
+    S.custom.push(custom);
+    registerCustom();
+    applySwap(p, id, onDone);
+  };
+  ci.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); cb.click(); } };
+  crow.append(cb);
+  cwrap.append(crow);
+  cwrap.append(Object.assign(el('p','tiny'), { textContent:
+    'A custom lift starts with no joint profile, so it will not be offered automatically as a substitute until you tell it what hurts.' }));
+  inner.append(cwrap);
+
+  sheetEl.append(inner);
+  document.body.append(sheetEl);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onSheetKey);
+  x.focus();
+}
+
+// Custom lifts live in state and are merged back into the library on every boot.
+function registerCustom() {
+  (S.custom || []).forEach(c => {
+    if (!EX.find(e => e.id === c.id)) EX.push(c);
+    if (SUBS[c.slot] && !SUBS[c.slot].includes(c.id)) SUBS[c.slot].push(c.id);
+  });
 }
 
 function finishSession() {
@@ -289,8 +516,8 @@ function finishSession() {
       if (vd.delta) { p.sets = Math.max(1, p.sets + vd.delta); changes.push(`${ex.name}: ${vd.note}.`); }
       changes.push(`${ex.name}: ${r.note}.`);
       entries.push({ exId: ex.id, slot: p.slot, sets, pump: d.pump, readiness: d.readiness,
-                     joint: d.joint, loadProgressed: progressed,
-                     perfDown: sets.some(s => s.reps < p.repLow - 1) });
+                     joint: d.joint, loadProgressed: progressed, note: r.note,
+                     nextLoad: p.load, perfDown: sets.some(s => s.reps < p.repLow - 1) });
       return;
     }
     entries.push({ exId: ex.id, slot: p.slot, sets, pump: d.pump, readiness: d.readiness,
@@ -306,8 +533,17 @@ function finishSession() {
   S.draft = null;
   save();
 
-  alert('Session logged.\n\nNext time:\n' + (changes.length ? changes.map(c => '• ' + c).join('\n') : 'No changes.'));
-  current = 'train'; render();
+  S.lastSummary = { date: today(), letter, week: S.week, lines: changes };
+  save();
+  current = 'train'; window.scrollTo(0, 0); render();
+}
+
+function lastFor(slot, exId) {
+  for (let i = S.sessions.length - 1; i >= 0; i--) {
+    const e = S.sessions[i].entries.find(x => x.slot === slot && x.exId === exId);
+    if (e && e.sets && e.sets.length) return Object.assign({ date: S.sessions[i].date }, e);
+  }
+  return null;
 }
 
 function slotHistory(slot) {
@@ -325,20 +561,35 @@ views.daily = root => {
   const trainingDay = S.sessions.some(s => s.date === t);
 
   // WATER
-  const targetOz = waterTargetOz(wt || S.profile.startWeight, trainingDay);
-  const targetBottles = Math.ceil(targetOz / 8);
+  const targetOz = waterTargetOz(S.profile.sex, trainingDay);
+  const oz = d.water * 8;
+  const pct = Math.min(1, oz / targetOz);
   const c1 = el('div','card');
   c1.append(el('h2','','Water'));
-  c1.append(el('p','hint', `${d.water} of ${targetBottles} bottles · ${d.water * 8} of ${targetOz} oz. One tap per 8 oz.`));
-  const bottles = el('div','bottles');
-  for (let i = 0; i < targetBottles; i++) {
-    const b = el('button','bottle' + (i < d.water ? ' full' : ''));
-    b.setAttribute('aria-label', `Bottle ${i + 1}`);
-    b.onclick = () => { d.water = (i < d.water) ? i : i + 1; save(); render(); };
-    bottles.append(b);
-  }
-  c1.append(bottles);
-  c1.append(el('p','tiny','Half an ounce per pound of bodyweight, plus 16 oz on a training day. A starting heuristic, not a medical protocol.'));
+
+  const ves = el('div','vessel');
+  ves.innerHTML = amphora(pct);
+  const vr = el('div','vessel-r');
+  const n = el('div','vessel-n');
+  n.innerHTML = oz + '<small>&nbsp;of ' + targetOz + ' oz</small>';
+  vr.append(n);
+  vr.append(Object.assign(el('div','vessel-s'), { textContent:
+    oz >= targetOz ? 'Target met. Stop counting and drink to thirst from here.'
+    : Math.ceil((targetOz - oz) / 8) + ' more glasses to go' + (trainingDay ? ', training day included.' : '.') }));
+  const vb = el('div','vessel-btns');
+  const add = (label, glasses, cls) => {
+    const b = el('button','btn sm ' + (cls || ''), label);
+    b.onclick = () => { d.water = Math.max(0, d.water + glasses); save(); render(); };
+    return b;
+  };
+  vb.append(add('+8 oz', 1, 'primary'));
+  vb.append(add('+16 oz', 2));
+  vb.append(add('\u2212 8 oz', -1, 'ghost'));
+  vr.append(vb);
+  ves.append(vr);
+  c1.append(ves);
+  c1.append(Object.assign(el('p','tiny'), { textContent:
+    'The National Academies put adequate total water intake at 125 oz a day for men and 91 for women, across everything you eat and drink. About a fifth of that comes from food, so the target above is the drinkable share, plus 20 oz on a training day. It is a population figure, not a prescription: thirst and pale urine are still the better guides.' }));
   root.append(c1);
 
   // SLEEP
@@ -407,6 +658,32 @@ views.daily = root => {
   c4.append(wr);
   root.append(c4);
 };
+
+function amphora(pct) {
+  const top = 34, bot = 110;                       // fillable range inside the vessel
+  const cl = Math.max(0, Math.min(1, pct));
+  const y = bot - cl * (bot - top);
+  return `<svg viewBox="0 0 86 128" role="img" aria-label="Vessel filled to ${Math.round(cl*100)} percent of today's water target">
+  <defs>
+    <clipPath id="ampClip">
+      <ellipse cx="43" cy="72" rx="31" ry="37"/>
+      <rect x="36" y="10" width="14" height="30"/>
+    </clipPath>
+  </defs>
+  <path d="M50 16 C67 17 74 30 71 45" fill="none" stroke="var(--line)" stroke-width="4" stroke-linecap="round"/>
+  <path d="M36 16 C19 17 12 30 15 45" fill="none" stroke="var(--line)" stroke-width="4" stroke-linecap="round"/>
+  <ellipse cx="43" cy="72" rx="31" ry="37" fill="var(--surface2)"/>
+  <rect x="36" y="10" width="14" height="30" fill="var(--surface2)"/>
+  <g clip-path="url(#ampClip)">
+    <rect x="0" y="${y}" width="86" height="${128 - y}" fill="var(--accent)" opacity=".8"/>
+    <rect x="0" y="${y}" width="86" height="1.6" fill="var(--accent)"/>
+  </g>
+  <ellipse cx="43" cy="72" rx="31" ry="37" fill="none" stroke="var(--line)" stroke-width="2"/>
+  <rect x="36" y="10" width="14" height="30" fill="none" stroke="var(--line)" stroke-width="2"/>
+  <rect x="29" y="5" width="28" height="7" rx="2.5" fill="var(--surface2)" stroke="var(--line)" stroke-width="2"/>
+  <path d="M34 106 L52 106 L57 121 L29 121 Z" fill="var(--surface2)" stroke="var(--line)" stroke-width="2" stroke-linejoin="round"/>
+</svg>`;
+}
 
 function latestWeight() {
   const ds = Object.keys(S.daily).sort().reverse();
@@ -704,6 +981,7 @@ views.settings = root => {
 };
 
 /* ---------------- boot ---------------- */
+registerCustom();
 render();
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
