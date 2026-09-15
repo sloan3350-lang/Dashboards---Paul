@@ -244,6 +244,22 @@ input[type=date]{text-align:left}
          padding:0;width:26px;height:44px;border-radius:6px}
 .setdrop:hover,.setdrop:focus-visible{color:var(--accent)}
 
+/* ---- reorder grip, preview, plan picker ---- */
+.grip{background:none;border:0;padding:0 2px;width:22px;height:44px;flex:none;
+      color:var(--muted);touch-action:none;cursor:grab;display:flex;align-items:center}
+.grip svg{width:16px;height:16px;fill:currentColor;stroke:none}
+.grip:active{cursor:grabbing;color:var(--accent)}
+.lift.dragging{position:relative;z-index:5;background:var(--surface2);border-radius:8px;
+               box-shadow:0 10px 26px rgba(0,0,0,.45);opacity:.97}
+.lift.dropmark{box-shadow:inset 0 -2px 0 var(--accent)}
+.lift.preview{cursor:default}
+.wk.previewing{background:var(--accent);color:var(--on-accent)}
+.card.preview{border-left:2px solid var(--accent)}
+.planlist{display:flex;flex-direction:column;margin-top:8px}
+.planrow{display:flex;align-items:center;gap:12px;padding:11px 2px;
+         border-bottom:1px solid var(--line)}
+.planrow:last-child{border-bottom:0}
+
 
 /* --- artifact build: :root already carries the safe-area insets --- */
 .top{top:0;padding-top:12px}
@@ -259,7 +275,7 @@ html,body{background:var(--bg)}
     </svg>
     <h1>Kanon</h1>
     <span class="sub">measured proportion</span>
-    <span class="wk" id="weekBadge">Week 1</span>
+    <button class="wk" id="weekBadge" type="button" aria-label="Choose week and session">Week 1</button>
     <button class="hbtn" id="themeBtn" type="button" aria-label="Switch colour theme"></button>
   </div>
 </header>

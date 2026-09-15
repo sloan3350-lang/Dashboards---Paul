@@ -8,17 +8,20 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>'
 
 /* ---------------- seed: Paul's locked Tue/Sat program ---------------- */
 function seed() {
-  const mk = (slot, exId) => ({ slot, exId, sets: 1, repLow: 8, repHigh: 12, load: null, misses: 0 });
+  // `primary` marks the compound slots that carry the extra week-2 set. It is a
+  // property of the slot, not of its position, so reordering cannot move volume.
+  const mk = (slot, exId, primary) => ({ slot, exId, sets: 1, repLow: 8, repHigh: 12,
+                                         load: null, misses: 0, primary: !!primary });
   return {
     profile: { sex:'male', age:44, heightIn:70, goal:'cut', appetiteSuppressed:true, theme:'dark',
                startWeight:219, targetWeight:207, trainDays:'Tue / Sat' },
     week: 1,
     next: 'A',
     plan: {
-      A: [mk('squat','legpress'), mk('hpress','machchest'), mk('vpull','latpulln'),
-          mk('hinge','rdl'),      mk('hpull','csrow'),      mk('vpress','machshld')],
-      B: [mk('squat','hacksquat'),mk('hpress','inclinemach'),mk('vpull','assistpull'),
-          mk('hinge','legcurl'),  mk('hpull','cablerow'),   mk('vpress','latraise')]
+      A: [mk('squat','legpress',1), mk('hpress','machchest',1), mk('vpull','latpulln',1),
+          mk('hinge','rdl'),        mk('hpull','csrow'),        mk('vpress','machshld')],
+      B: [mk('squat','hacksquat',1),mk('hpress','inclinemach',1),mk('vpull','assistpull',1),
+          mk('hinge','legcurl'),    mk('hpull','cablerow'),     mk('vpress','latraise')]
     },
     sessions: [], quarantine: {},
     daily: {
@@ -26,22 +29,32 @@ function seed() {
       '2026-08-31': { water:0, sleep:7,  protein:'', weight:215.5 },
       '2026-09-07': { water:0, sleep:'', protein:'', weight:214.6 }
     },
-    measure: [], lastSummary: null,
+    measure: [], lastSummary: null, preview: null,
     draft: null
   };
 }
 let S = load();
 function load() {
-  try { const r = localStorage.getItem(K); if (r) return Object.assign(seed(), JSON.parse(r)); }
+  try {
+    const r = localStorage.getItem(K);
+    if (r) {
+      const st = Object.assign(seed(), JSON.parse(r));
+      // plans saved before `primary` existed: the first three slots carried it
+      ['A','B'].forEach(L => (st.plan[L] || []).forEach((p, i) => {
+        if (p.primary === undefined) p.primary = i < 3;
+      }));
+      return st;
+    }
+  }
   catch (e) { console.warn('state unreadable, starting fresh', e); }
   return seed();
 }
 function save() { try { localStorage.setItem(K, JSON.stringify(S)); } catch (e) { alert('Could not save locally. Export your data from Settings.'); } }
 
 /* ---------------- week rules (the ramp already locked in your program) ---------------- */
-function setsForWeek(week, idx) {
+function setsForWeek(week, isPrimary) {
   if (week <= 1) return 1;
-  if (week === 2) return idx < 3 ? 2 : 1;
+  if (week === 2) return isPrimary ? 2 : 1;
   if (week === 5) return 1;                       // deload
   return 2;
 }
@@ -88,7 +101,11 @@ function render() {
     node.innerHTML = '';
     if (v === current) views[v](node);
   });
-  $('#weekBadge').textContent = 'Week ' + S.week + (S.week === 5 ? ' · deload' : '');
+  const wb = $('#weekBadge');
+  wb.textContent = S.preview
+    ? 'Wk ' + S.preview.week + ' \u00b7 ' + S.preview.letter + ' \u00b7 preview'
+    : 'Wk ' + S.week + ' \u00b7 ' + S.next + (S.week === 5 ? ' \u00b7 deload' : '');
+  wb.classList.toggle('previewing', !!S.preview);
   document.querySelectorAll('.tab').forEach(t =>
     t.setAttribute('aria-selected', String(t.dataset.view === current)));
 }
@@ -97,11 +114,36 @@ document.querySelectorAll('.tab').forEach(t =>
 
 /* =================== TRAIN =================== */
 views.train = root => {
-  const letter = S.next;
+  const pv = S.preview;
+  const letter = pv ? pv.letter : S.next;
+  const week = pv ? pv.week : S.week;
   const plan = S.plan[letter];
   const dl = deloadCheckLocal();
 
-  if (!S.draft || S.draft.letter !== letter) S.draft = { letter, date: today(), week: S.week, entries: {} };
+  // Preview never touches the draft: browsing ahead must not create log state.
+  if (!pv && (!S.draft || S.draft.letter !== letter)) {
+    S.draft = { letter, date: today(), week: S.week, entries: {} };
+  }
+
+  if (pv) {
+    const banner = el('div','card preview');
+    banner.append(el('div','eyebrow','Previewing'));
+    banner.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' \u00b7 Week ' + week }));
+    banner.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
+    banner.append(Object.assign(el('p','tiny'), { textContent:
+      'Looking ahead only. Nothing here is logged, and your current session is still Session ' +
+      S.next + ', week ' + S.week + '.' }));
+    const back = el('button','btn primary block','Back to Session ' + S.next + ', week ' + S.week);
+    back.style.marginTop = '12px';
+    back.onclick = () => { S.preview = null; save(); render(); };
+    banner.append(back);
+    root.append(banner);
+
+    const list = el('div','card liftlist');
+    plan.forEach((p, idx) => list.append(liftRow(p, idx, week, true)));
+    root.append(list);
+    return;
+  }
 
   const head = el('div','card hero');
   // The artwork is an optional asset: if img/hero.jpg is not published, onerror
@@ -112,7 +154,7 @@ views.train = root => {
   head.append(himg);
   const ov = el('div','hero-ov');
   ov.append(Object.assign(el('h2'), { textContent: 'Session ' + letter + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
-  ov.append(Object.assign(el('p','hint'), { textContent: weekBlurb() }));
+  ov.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
   head.append(ov);
   if (dl.deload && S.week !== 5) {
     const a = el('div','alert warn');
@@ -149,8 +191,9 @@ views.train = root => {
   }
 
   const list = el('div','card liftlist');
-  plan.forEach((p, idx) => list.append(liftRow(p, idx)));
+  plan.forEach((p, idx) => list.append(liftRow(p, idx, week, false)));
   root.append(list);
+  makeReorderable(list, plan);
 
   const fin = el('button','btn primary block','Finish session');
   fin.onclick = finishSession;
@@ -162,11 +205,11 @@ views.train = root => {
   root.append(note);
 };
 
-function weekBlurb() {
-  const rir = rirForWeek(S.week);
-  if (S.week === 5) return 'Deload. One set a slot, five reps left in the tank, clean technique. You are not chasing anything this week.';
-  if (S.week === 1) return 'Six slots, one working set each, eight to twelve reps, ' + rir + ' left in the tank. Nothing near failure.';
-  if (S.week === 2) return 'Two sets on the first three slots, one on the rest. ' + rir + ' reps left in the tank.';
+function weekBlurb(week) {
+  const rir = rirForWeek(week);
+  if (week === 5) return 'Deload. One set a slot, five reps left in the tank, clean technique. You are not chasing anything this week.';
+  if (week === 1) return 'Six slots, one working set each, eight to twelve reps, ' + rir + ' left in the tank. Nothing near failure.';
+  if (week === 2) return 'Two sets on the three compound slots, one on the rest. ' + rir + ' reps left in the tank.';
   return 'Two sets a slot, ' + rir + ' reps left in the tank. The engine adds a third only if a lift stalls.';
 }
 
@@ -177,16 +220,29 @@ function draftFor(p) {
     (S.draft.entries[p.slot] = { exId: p.exId, slot: p.slot, sets: [], pump: 0, readiness: 0, joint: null, done: false });
 }
 
-function liftRow(p, idx) {
+function liftRow(p, idx, week, preview) {
   const ex = byId(p.exId);
-  const d = draftFor(p);
-  const nSets = Math.max(p.sets, setsForWeek(S.week, idx));
-  const logged = d.sets.filter(x => x.reps).length;
+  const d = preview ? null : draftFor(p);
+  const nSets = Math.max(p.sets, setsForWeek(week, p.primary));
+  const logged = d ? d.sets.filter(x => x.reps).length : 0;
 
-  const row = el('button','lift' + (d.done ? ' done' : ''));
-  row.type = 'button';
-  row.onclick = () => openLift(p, idx);
+  const row = el('div','lift' + (d && d.done ? ' done' : '') + (preview ? ' preview' : ''));
+  if (!preview) {
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.onclick = () => openLift(p, idx);
+    row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLift(p, idx); } };
+  }
 
+  if (!preview) {
+    const grip = el('button','grip');
+    grip.type = 'button';
+    grip.title = 'Drag to reorder, or use the arrow keys';
+    grip.setAttribute('aria-label', 'Reorder ' + ex.name + '. Drag, or press the up and down arrow keys.');
+    grip.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="3" r="1.3"/><circle cx="10" cy="3" r="1.3"/><circle cx="6" cy="8" r="1.3"/><circle cx="10" cy="8" r="1.3"/><circle cx="6" cy="13" r="1.3"/><circle cx="10" cy="13" r="1.3"/></svg>';
+    grip.onclick = e => e.stopPropagation();
+    row.append(grip);
+  }
   row.append(el('span','lift-i', String(idx + 1)));
   const body = el('span','lift-b');
   body.append(el('span','ex-slot', SLOTS.find(s => s.id === p.slot).name));
@@ -196,11 +252,69 @@ function liftRow(p, idx) {
   row.append(body);
   row.append(el('span','spacer'));
   const st = el('span','lift-s');
-  if (d.done) { st.classList.add('ok'); st.textContent = '\u2713'; }
+  if (preview) st.textContent = '';
+  else if (d.done) { st.classList.add('ok'); st.textContent = '\u2713'; }
   else if (logged) { st.classList.add('part'); st.textContent = logged + '/' + nSets; }
   else st.textContent = '\u2192';
   row.append(st);
   return row;
+}
+
+/* Drag by the grip, or move with the arrow keys when focused on it. */
+function makeReorderable(list, plan) {
+  const rows = Array.from(list.querySelectorAll('.lift'));
+  rows.forEach((row, from) => {
+    const grip = row.querySelector('.grip');
+    if (!grip) return;
+
+    grip.onkeydown = e => {
+      const dir = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      const to = from + dir;
+      if (to < 0 || to >= plan.length) return;
+      plan.splice(to, 0, plan.splice(from, 1)[0]);
+      save(); render();
+      const next = document.querySelectorAll('.liftlist .grip')[to];
+      if (next) next.focus();
+    };
+
+    grip.addEventListener('pointerdown', e => {
+      if (e.button) return;
+      e.preventDefault();
+      const rects = rows.map(r => r.getBoundingClientRect());
+      const startY = e.clientY;
+      let to = from;
+      grip.setPointerCapture(e.pointerId);
+      row.classList.add('dragging');
+
+      const move = ev => {
+        const dy = ev.clientY - startY;
+        row.style.transform = 'translateY(' + dy + 'px)';
+        const mid = rects[from].top + rects[from].height / 2 + dy;
+        let idx = 0;
+        rects.forEach((r, i) => { if (mid > r.top + r.height / 2) idx = i; });
+        if (idx !== to) {
+          to = idx;
+          rows.forEach((r, i) => r.classList.toggle('dropmark', i === to && i !== from));
+        }
+      };
+      const up = ev => {
+        try { grip.releasePointerCapture(ev.pointerId); } catch (_) {}
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        row.style.transform = '';
+        row.classList.remove('dragging');
+        rows.forEach(r => r.classList.remove('dropmark'));
+        if (to !== from) { plan.splice(to, 0, plan.splice(from, 1)[0]); save(); }
+        render();
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+  });
 }
 
 /* ---- one lift at a time: log the sets, then the questions in sequence ---- */
@@ -223,7 +337,7 @@ function openLift(p, idx) {
 
   function drawStep() {
     const ex = byId(p.exId);
-    const nSets = Math.max(p.sets, setsForWeek(S.week, idx));
+    const nSets = Math.max(p.sets, setsForWeek(S.week, p.primary));
     const rir = rirForWeek(S.week);
     inner.innerHTML = '';
 
@@ -610,6 +724,98 @@ function slotHistory(slot) {
     .map(s => s.entries.find(e => e.slot === slot))
     .filter(Boolean)
     .map(e => ({ loadProgressed: !!e.loadProgressed }));
+}
+
+/* ---- week / session picker ---- */
+function openPlanPicker() {
+  closeSheet();
+  let week = S.preview ? S.preview.week : S.week;
+  let letter = S.preview ? S.preview.letter : S.next;
+
+  sheetEl = el('div','sheet');
+  sheetEl.setAttribute('role','dialog');
+  sheetEl.setAttribute('aria-modal','true');
+  sheetEl.setAttribute('aria-label','Choose week and session');
+  sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
+  const inner = el('div','sheet-inner');
+  sheetEl.append(inner);
+  document.body.append(sheetEl);
+  document.body.style.overflow = 'hidden';
+  document.addEventListener('keydown', onSheetKey);
+  draw();
+
+  function draw() {
+    inner.innerHTML = '';
+    const head = el('div','sheet-h');
+    const t = el('div');
+    t.append(el('div','ex-slot','The mesocycle'));
+    t.append(Object.assign(el('h2'), { textContent: 'Week and session' }));
+    head.append(t);
+    head.append(el('div','spacer'));
+    const x = el('button','btn sm ghost','Close');
+    x.onclick = () => { closeSheet(); render(); };
+    head.append(x);
+    inner.append(head);
+
+    inner.append(el('div','eyebrow','Week'));
+    const wr = el('div','opts triple');
+    [1,2,3,4,5].forEach(n => {
+      const b = el('button','opt', n === 5 ? '5 \u00b7 deload' : String(n));
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(week === n));
+      b.onclick = () => { week = n; draw(); };
+      wr.append(b);
+    });
+    inner.append(wr);
+
+    inner.append(el('div','eyebrow','Session'));
+    const sr = el('div','opts triple');
+    ['A','B'].forEach(L => {
+      const b = el('button','opt', 'Session ' + L);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(letter === L));
+      b.onclick = () => { letter = L; draw(); };
+      sr.append(b);
+    });
+    inner.append(sr);
+
+    inner.append(Object.assign(el('p','qs'), { textContent: weekBlurb(week) }));
+    const list = el('div','planlist');
+    S.plan[letter].forEach((p, i) => {
+      const r = el('div','planrow');
+      r.append(el('span','lift-i', String(i + 1)));
+      const b2 = el('span','lift-b');
+      b2.append(el('span','ex-slot', SLOTS.find(s2 => s2.id === p.slot).name));
+      b2.append(el('span','lift-n', byId(p.exId).name));
+      r.append(b2);
+      r.append(el('span','spacer'));
+      const n = Math.max(p.sets, setsForWeek(week, p.primary));
+      r.append(Object.assign(el('span','lift-t'), {
+        textContent: n + ' \u00d7 ' + p.repLow + '\u2013' + p.repHigh + ' @ ' + rirForWeek(week) + ' RIR' }));
+      list.append(r);
+    });
+    inner.append(list);
+
+    const isCurrent = week === S.week && letter === S.next;
+    const go = el('button','btn primary block',
+      isCurrent ? 'This is your current session' : 'Preview this');
+    go.disabled = isCurrent;
+    go.style.marginTop = '14px';
+    go.onclick = () => { S.preview = { week, letter }; save(); closeSheet(); current = 'train'; render(); };
+    inner.append(go);
+
+    if (!isCurrent) {
+      const set = el('button','btn block ghost','Make this my current session');
+      set.style.marginTop = '8px';
+      set.onclick = () => {
+        S.week = week; S.next = letter; S.preview = null; S.draft = null;
+        save(); closeSheet(); current = 'train'; render();
+      };
+      inner.append(set);
+    }
+    inner.append(Object.assign(el('p','tiny'), { textContent:
+      'Preview looks without logging. Only "make this my current session" changes what you are actually training, and it clears any part-logged session.' }));
+  }
 }
 
 /* =================== DAILY =================== */
@@ -1118,7 +1324,9 @@ views.settings = root => {
 
 /* ---------------- boot ---------------- */
 registerCustom();
+save();            // persist the seed so first-run state is durable
 applyTheme();
+$('#weekBadge').onclick = openPlanPicker;
 $('#themeBtn').onclick = () => {
   S.profile.theme = S.profile.theme === 'light' ? 'dark' : 'light';
   save(); applyTheme();
