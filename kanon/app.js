@@ -52,6 +52,9 @@ function load() {
         if (p.primary === undefined) p.primary = i < 3;
       }));
       if (typeof st.cur !== 'number' || !st.days[st.cur]) st.cur = 0;
+      // Browsing ahead is a look, not a place. A reload always lands back on
+      // the live session, so nobody reopens the app into a read-only screen.
+      st.preview = null;
       return st;
     }
   }
@@ -150,37 +153,54 @@ views.train = root => {
     root.append(banner);
 
     const list = el('div','card liftlist');
+    list.append(Object.assign(el('p','tiny listnote'), { textContent:
+      'Read only. Go back to your current session to log sets.' }));
     plan.forEach((p, idx) => list.append(liftRow(p, idx, week, true)));
     root.append(list);
     return;
   }
 
+  // The artwork sits in its own band with nothing but the session title over it,
+  // so the figure is not buried under a paragraph of scrim. Everything else
+  // reads on the card surface below. If the file is missing, onerror strips the
+  // band and the title falls back into the body — no broken icon, nothing to set.
   const head = el('div','card hero');
-  // The artwork is an optional asset: if img/hero.jpg is not published, onerror
-  // strips the image and the card falls back to plain type with no broken icon.
+  const title = () => Object.assign(el('h2'), { textContent:
+    day.name + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) });
+  const body = el('div','hero-body');
   const fig = S.profile.figure || 'male';
+
   if (fig === 'none') {
     head.classList.add('noimg');
+    body.append(title());
   } else {
+    const art = el('div','hero-art');
     const himg = el('img');
     himg.src = 'img/hero-' + fig + '.jpg';
     himg.alt = ''; himg.loading = 'eager';
-    himg.onerror = () => { head.classList.add('noimg'); himg.remove(); };
-    head.append(himg);
+    himg.onerror = () => {
+      head.classList.add('noimg');
+      art.remove();
+      body.prepend(title());
+    };
+    art.append(himg);
+    const ov = el('div','hero-ov');
+    ov.append(title());
+    art.append(ov);
+    head.append(art);
   }
-  const ov = el('div','hero-ov');
-  ov.append(Object.assign(el('h2'), { textContent: day.name + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) }));
-  ov.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
-  head.append(ov);
+
+  body.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
   if (dl.deload && S.week !== 5) {
     const a = el('div','alert warn');
     a.innerHTML = '<b>Early deload recommended</b>' + esc(dl.reason) + '. Cut the sets in half and back off the effort this session.';
-    ov.append(a);
+    body.append(a);
   }
   const doneN = plan.filter(p => S.draft.entries[p.slot] && S.draft.entries[p.slot].done).length;
-  ov.append(Object.assign(el('p','tiny'), { textContent:
+  body.append(Object.assign(el('p','tiny'), { textContent:
     doneN ? doneN + ' of ' + plan.length + ' done. Take them in whatever order the machines are free.'
           : 'Take them in whatever order the machines are free. Tap a lift to log it.' }));
+  head.append(body);
   root.append(head);
 
   if (S.lastSummary && S.lastSummary.lines && S.lastSummary.lines.length) {

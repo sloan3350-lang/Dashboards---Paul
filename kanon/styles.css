@@ -224,17 +224,21 @@ input[type=date]{text-align:left}
 .tiny{font-size:11.5px;color:var(--muted);line-height:1.6;margin:10px 0 0}
 .eyebrow:not(:first-child){margin-top:20px}
 
-/* ---- hero: renders art when img/hero.jpg is published, plain type when not ---- */
+/* ---- hero: an art band with only the session title over it, then the
+       session copy on the card surface underneath. The scrim is a short
+       bottom fade, so the figure is legible instead of buried. ---- */
 .hero{position:relative;padding:0;overflow:hidden;isolation:isolate}
-.hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
-          object-position:left center;z-index:-1}
-.hero-ov{padding:20px 16px;min-height:168px;display:flex;flex-direction:column;justify-content:flex-end;
-         background:linear-gradient(180deg,rgba(9,9,10,.15) 0%,rgba(9,9,10,.82) 62%,rgba(9,9,10,.94) 100%)}
-.hero-ov h2{color:#F4F2EF;text-shadow:0 1px 14px rgba(0,0,0,.7)}
-.hero-ov .hint,.hero-ov .tiny{color:#C9C7C4}
-.hero.noimg .hero-ov{background:none;min-height:0;padding:18px 16px}
-.hero.noimg .hero-ov h2{color:var(--ink);text-shadow:none}
-.hero.noimg .hero-ov .hint,.hero.noimg .hero-ov .tiny{color:var(--muted)}
+.hero-art{position:relative;height:200px}
+@media (min-width:470px){.hero-art{height:230px}}
+.hero-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+              object-position:left center}
+.hero-ov{position:absolute;left:0;right:0;bottom:0;padding:34px 16px 14px;
+         background:linear-gradient(180deg,transparent 0%,rgba(9,9,10,.55) 45%,rgba(9,9,10,.90) 100%)}
+.hero-ov h2{color:#F4F2EF;text-shadow:0 1px 14px rgba(0,0,0,.75)}
+.hero-body{padding:14px 16px 16px}
+.hero-body .hint{margin:0}
+.hero-body .tiny{margin-top:8px}
+.hero.noimg .hero-body{padding:18px 16px}
 .setrow{grid-template-columns:20px 1fr 1fr 1fr 26px}
 .setdrop{background:none;border:0;color:var(--muted);font-size:19px;line-height:1;
          padding:0;width:26px;height:44px;border-radius:6px}
@@ -248,7 +252,8 @@ input[type=date]{text-align:left}
 .lift.dragging{position:relative;z-index:5;background:var(--surface2);border-radius:8px;
                box-shadow:0 10px 26px rgba(0,0,0,.45);opacity:.97}
 .lift.dropmark{box-shadow:inset 0 -2px 0 var(--accent)}
-.lift.preview{cursor:default}
+.lift.preview{cursor:default;opacity:.72}
+.listnote{margin:2px 2px 10px;color:var(--muted);letter-spacing:.02em}
 .wk.previewing{background:var(--accent);color:var(--on-accent)}
 .card.preview{border-left:2px solid var(--accent)}
 .planlist{display:flex;flex-direction:column;margin-top:8px}
