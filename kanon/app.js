@@ -116,6 +116,22 @@ const stored = v => fromUnit(v, U());                  // typed  -> stored
 const uLabel = () => U();
 const showLoad = lb => (lb === '' || lb == null) ? '' : disp(lb) + ' ' + uLabel();
 
+/* ---------------- profile bounds ----------------
+ * These numbers feed the Navy body-fat formula, the protein target and the
+ * rate-of-loss flag. A blank or a typo does not fail loudly there, it produces a
+ * confident wrong number, which is worse. So clamp at the input. */
+const BOUNDS = { age:[13,100], feet:[3,8], inches:[0,11.75], weightLb:[50,700] };
+function clamp(v, [lo, hi]) {
+  const n = Number(v);
+  if (v === '' || v === null || !isFinite(n)) return '';
+  return Math.min(hi, Math.max(lo, n));
+}
+function profileComplete(pf) {
+  return clamp(pf.age, BOUNDS.age) !== '' &&
+         clamp(pf.heightIn, [BOUNDS.feet[0] * 12, BOUNDS.feet[1] * 12 + 11.75]) !== '' &&
+         clamp(pf.startWeight, BOUNDS.weightLb) !== '';
+}
+
 /* ---------------- week rules (the ramp already locked in your program) ---------------- */
 function setsForWeek(week, isPrimary) {
   if (week <= 1) return 1;
@@ -646,10 +662,17 @@ function openLift(p, idx) {
 
     if (d.joint) {
       inner.append(Object.assign(el('div','qs'), { textContent: 'Which joint?' }));
+      // Put the joints this lift actually loads first, and grey the rest. A leg
+      // press cannot give you wrist pain, and offering all six in a fixed order
+      // invites a mis-tap that quarantines the wrong movement.
+      const cost = j => (ex.joints && ex.joints[j]) || 0;
+      const ordered = JOINTS.slice().sort((a, b) => cost(b) - cost(a));
       const grid = el('div','jointgrid');
-      JOINTS.forEach(j => {
-        const o = el('button','opt'); o.type = 'button';
+      ordered.forEach(j => {
+        const o = el('button','opt' + (cost(j) ? '' : ' faint')); o.type = 'button';
         o.textContent = jointName(j);
+        o.title = cost(j) ? jointName(j) + ' takes load on this lift'
+                          : ex.name + ' does not normally load the ' + jointName(j);
         o.setAttribute('aria-pressed', String(d.joint.joint === j));
         o.onclick = () => { d.joint.joint = j; save(); drawStep(); };
         grid.append(o);
@@ -667,7 +690,7 @@ function openLift(p, idx) {
         let html = '<b>' + esc(act.title) + '</b>' + esc(act.body);
         if (act.action === 'swap' || act.action === 'stop') {
           html += sub
-            ? '<br><br>Same slot, less ' + esc(jointName(d.joint.joint)) + ': <b>' + esc(sub.name) + '</b>.'
+            ? '<br><br>Same slot, less ' + esc(jointName(d.joint.joint)) + ': <b>' + esc(sub.name) + '</b>'
             : '<br><br>Nothing left in this slot loads that joint less. Drop the slot for now.';
         }
         a.innerHTML = html;
@@ -729,8 +752,19 @@ function jointSummary(ex) {
 }
 
 function applySwap(p, exId, onDone) {
+  // Sets logged against the old lift cannot follow it: reps of a leg press are
+  // not reps of a belt squat, and the progression engine would read them as if
+  // they were. So they go — but not silently, because they are work you did.
+  const d = S.draft && S.draft.entries[p.slot];
+  const loggedSets = d ? d.sets.filter(x => x.reps !== '' && Number(x.reps) > 0).length : 0;
+  if (loggedSets) {
+    const old = byId(p.exId), nu = byId(exId);
+    if (!confirm('You have ' + loggedSets + ' set' + (loggedSets > 1 ? 's' : '') +
+                 ' logged against ' + old.name + '.\n\nSwapping to ' + nu.name +
+                 ' discards them, because those reps are not reps of the new lift.\n\nSwap anyway?')) return;
+  }
   p.exId = exId; p.load = null; p.misses = 0;
-  if (S.draft && S.draft.entries[p.slot]) delete S.draft.entries[p.slot];
+  if (d) delete S.draft.entries[p.slot];
   save(); closeSheet();
   if (onDone) onDone(); else render();
 }
@@ -776,7 +810,10 @@ function openSwap(p, onDone) {
     const rest = S.quarantine[id];
     const row = el('button','sheetrow' + (isCur ? ' cur' : ''));
     row.type = 'button';
-    row.disabled = !!rest;
+    // The lift you are already on has nothing to do. It used to render as an
+    // ordinary enabled button that silently ignored taps, which reads as the app
+    // freezing rather than as "you are already here".
+    row.disabled = !!rest || isCur;
     const left = el('div');
     left.append(el('div','sheetrow-n', cand.name));
     left.append(el('div','sheetrow-m',
@@ -1000,13 +1037,22 @@ function openMesoWizard(opts) {
     inner.append(row);
   }
 
-  function numField(label, value, onChange, suffix) {
+  function numField(label, value, onChange, suffix, bounds) {
     const wrap = el('div');
     wrap.style.flex = '1 1 90px';
     wrap.append(el('div','lbl', label));
-    const i = el('input'); i.type = 'number'; i.inputMode = 'decimal'; i.min = '0';
+    const i = el('input'); i.type = 'number'; i.inputMode = 'decimal';
+    if (bounds) { i.min = String(bounds[0]); i.max = String(bounds[1]); }
     i.value = value == null ? '' : value;
     i.oninput = () => onChange(i.value);
+    // Clamp when they leave the field rather than while typing, so entering
+    // "5" on the way to "50" does not get yanked to the minimum mid-keystroke.
+    i.onblur = () => {
+      if (!bounds) return;
+      const c = clamp(i.value, bounds);
+      if (String(c) !== i.value) { i.value = c; onChange(c); }
+      draw();
+    };
     wrap.append(i);
     if (suffix) wrap.append(el('div','lbl', suffix));
     return wrap;
@@ -1050,16 +1096,28 @@ function openMesoWizard(opts) {
 
     inner.append(el('div','eyebrow','Age, height and weight'));
     const row = el('div','row wrap');
-    row.append(numField('Age', S.profile.age, v => { S.profile.age = Number(v) || ''; save(); }));
+    row.append(numField('Age', S.profile.age,
+      v => { S.profile.age = v === '' ? '' : Number(v); save(); }, null, BOUNDS.age));
     const ft = Math.floor((Number(S.profile.heightIn) || 0) / 12) || '';
-    const inch = round1((Number(S.profile.heightIn) || 0) - (ft || 0) * 12) || '';
+    const inch = S.profile.heightIn ? round1(Number(S.profile.heightIn) - (ft || 0) * 12) : '';
     let f = ft, n2 = inch;
-    const setH = () => { S.profile.heightIn = round1((Number(f) || 0) * 12 + (Number(n2) || 0)); save(); };
-    row.append(numField('Feet', ft, v => { f = v; setH(); }));
-    row.append(numField('Inches', inch, v => { n2 = v; setH(); }));
+    const setH = () => {
+      const t2 = round1((Number(f) || 0) * 12 + (Number(n2) || 0));
+      S.profile.heightIn = t2 || '';
+      save();
+    };
+    row.append(numField('Feet', ft, v => { f = v; setH(); }, null, BOUNDS.feet));
+    row.append(numField('Inches', inch, v => { n2 = v; setH(); }, null, BOUNDS.inches));
+    const wB = [round1(disp(BOUNDS.weightLb[0])), round1(disp(BOUNDS.weightLb[1]))];
     row.append(numField('Weight', S.profile.startWeight ? disp(S.profile.startWeight) : '',
-      v => { S.profile.startWeight = stored(v); save(); }, uLabel()));
+      v => { S.profile.startWeight = v === '' ? '' : stored(v); save(); }, uLabel(), wB));
     inner.append(row);
+
+    if (!profileComplete(S.profile)) {
+      inner.append(Object.assign(el('div','alert warn'), { innerHTML:
+        '<b>Age, height and weight are needed before the rest works</b>' +
+        'They drive the protein target, the body-fat estimate and the rate-of-loss check. Without them those screens would show a confident wrong number rather than nothing, which is worse.' }));
+    }
 
     inner.append(el('div','eyebrow','Units'));
     const un = el('div','opts triple');
@@ -1085,7 +1143,7 @@ function openMesoWizard(opts) {
       inner.append(b);
     });
 
-    nav(null, 1, 'Next');
+    nav(null, 1, 'Next', () => profileComplete(S.profile));
   }
 
   /* ---- step 1: schedule ---- */
@@ -1824,11 +1882,26 @@ views.settings = root => {
     const w = el('div'); w.style.margin = '0 0 12px';
     w.append(el('div','lbl', label));
     const isW = k === 'startWeight' || k === 'targetWeight';
+    const bounds = isW ? [round1(disp(BOUNDS.weightLb[0])), round1(disp(BOUNDS.weightLb[1]))] : BOUNDS.age;
     const i = el('input'); i.type = type;
+    i.min = String(bounds[0]); i.max = String(bounds[1]);
     i.value = isW ? disp(S.profile[k]) : S.profile[k];
     i.id = 'pf-' + k;
     i.setAttribute('aria-label', label);
-    i.oninput = () => { S.profile[k] = isW ? stored(i.value) : Number(i.value); save(); };
+    i.oninput = () => {
+      S.profile[k] = i.value === '' ? '' : (isW ? stored(i.value) : Number(i.value));
+      save();
+    };
+    // Clamp on the way out, not on every keystroke, so typing 5 toward 50 is not
+    // snapped to the minimum halfway through.
+    i.onblur = () => {
+      const c = clamp(i.value, bounds);
+      if (String(c) !== i.value) {
+        i.value = c;
+        S.profile[k] = c === '' ? '' : (isW ? stored(c) : Number(c));
+        save();
+      }
+    };
     w.append(i); return w;
   };
   c.append(field('age', 'Age', 'number'));
@@ -1915,6 +1988,13 @@ views.settings = root => {
     lw.append(b);
   });
   c.append(lw);
+
+  if (!profileComplete(S.profile)) {
+    const warn = el('div','alert warn');
+    warn.innerHTML = '<b>Age, height and weight are incomplete</b>' +
+      'The protein target, the body-fat estimate and the rate-of-loss check all read these. Until they are filled in, those screens have nothing honest to show.';
+    c.append(warn);
+  }
 
   const ap = el('button','opt');
   ap.setAttribute('aria-pressed', String(!!S.profile.appetiteSuppressed));
