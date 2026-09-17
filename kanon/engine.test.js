@@ -193,5 +193,49 @@ const capped = E.suggestSet({ target: { load: 100, repLow: 8, repHigh: 12 },
   lastEntry: { sets: [{ load: 100, reps: 12 }] }, level: 'inter' });
 ok('the rep suggestion never exceeds the top of the range', capped.reps === 12);
 
+/* ---------------- block length ---------------- */
+ok('a block can be any of the offered lengths', E.BLOCK_LENGTHS.includes(8) && E.BLOCK_LENGTHS.includes(5));
+ok('the last week of any block is the deload',
+   E.isDeload(8, 8) && E.isDeload(5, 5) && !E.isDeload(5, 8));
+ok('effort ramps from four reps in the tank down to one',
+   E.blockRir(1, 8) === 4 && E.blockRir(7, 8) === 1);
+ok('the deload week backs the effort right off', E.blockRir(8, 8) === 5);
+ok('an eight week block ramps monotonically', (() => {
+  const r = [1,2,3,4,5,6,7].map(w => E.blockRir(w, 8));
+  return r.every((v, i) => i === 0 || v <= r[i - 1]);
+})());
+ok('week one eases a set off the plan', E.blockSets(1, 3, 8) === 2);
+ok('the middle of the block carries the planned sets', E.blockSets(4, 3, 8) === 3);
+ok('the deload halves the sets', E.blockSets(8, 3, 8) === 1);
+ok('a deload never drops below one set', E.blockSets(8, 1, 8) === 1);
+ok('a scheduled deload fires on the last week of the block it is given',
+   E.deloadCheck(8, {}, 8).deload === true && E.deloadCheck(5, {}, 8).deload === false);
+
+/* ---------------- goal-aware programme selection ---------------- */
+E.setSlots(D.SLOTS);
+const gain = { days: 5, minutes: 75, level: 'inter', goal: 'gain' };
+const scored = E.programsFor(gain).map(pr =>
+  E.programScore(Object.assign({ programId: pr.id }, gain), D.EX, D.SUBS, D.SLOTS).clears);
+ok('a generous schedule can get every major muscle to ten sets a week',
+   Math.max.apply(null, scored) === E.MAJOR_MUSCLES.length);
+const tight = { days: 2, minutes: 45, level: 'inter', goal: 'gain' };
+const scoredTight = E.programsFor(tight).map(pr =>
+  E.programScore(Object.assign({ programId: pr.id }, tight), D.EX, D.SUBS, D.SLOTS).clears);
+ok('a tight schedule honestly reports that it cannot',
+   Math.max.apply(null, scoredTight) < E.MAJOR_MUSCLES.length);
+ok('capacity scales with days and minutes',
+   E.weekCapacity(gain).weeklySets > E.weekCapacity(tight).weeklySets);
+
+const fb = E.buildProgram({ programId:'fullclassic', days:3, minutes:60, level:'inter', goal:'gain' }, D.EX, D.SUBS);
+ok('every full body session carries direct biceps work',
+   fb.every(d => d.slots.some(p => p.slot === 'biceps')));
+ok('every full body session carries direct triceps work',
+   fb.every(d => d.slots.some(p => p.slot === 'triceps')));
+ok('every full body session still covers all six main patterns',
+   fb.every(d => ['squat','hpress','vpull','hinge','hpull','vpress']
+     .every(sl => d.slots.some(p => p.slot === sl))));
+ok('no session runs over the time budget',
+   fb.every(d => d.minutes <= 60 + 4));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

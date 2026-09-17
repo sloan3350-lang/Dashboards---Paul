@@ -27,7 +27,7 @@ function seed() {
       { name: 'Full body B', slots: [mk('squat','hacksquat',1), mk('hpress','inclinemach',1),
           mk('vpull','assistpull',1), mk('hinge','legcurl'), mk('hpull','cablerow'), mk('vpress','latraise')] }
     ],
-    setup: { days: 2, minutes: 50 },
+    setup: { days: 2, minutes: 50, weeks: 8 },
     sessions: [], quarantine: {},
     daily: {
       '2026-08-30': { water:0, sleep:'', protein:'', weight:219.0 },
@@ -99,6 +99,7 @@ function parseState(raw) {
   if (typeof st.cur !== 'number' || !st.days[st.cur]) st.cur = 0;
   if (!st.profile.level) st.profile.level = 'inter';
   if (!st.profile.unit) st.profile.unit = 'lb';
+  if (!st.setup.weeks) st.setup.weeks = 5;
   if (st.profile.onboarded === undefined) st.profile.onboarded = st.sessions && st.sessions.length > 0;
   // Browsing ahead is a look, not a place. A reload always lands back on
   // the live session, so nobody reopens the app into a read-only screen.
@@ -133,14 +134,17 @@ function profileComplete(pf) {
 }
 
 /* ---------------- week rules (the ramp already locked in your program) ---------------- */
-function setsForWeek(week, isPrimary) {
-  if (week <= 1) return 1;
-  if (week === 2) return isPrimary ? 2 : 1;
-  if (week === 5) return 1;                       // deload
-  return 2;
+const blockWeeks = () => (S.setup && S.setup.weeks) || 5;
+/* The plan carries the working set count for each slot; the week scales it.
+ * Week 1 eases in, the last week halves, the middle carries the full load. This
+ * has to REPLACE the planned number, not be maxed against it, or the deload
+ * never actually deloads. */
+const setsThisWeek = (week, p) => blockSets(week, p.sets || 1, blockWeeks());
+function setsForWeek(week, isPrimary) {      // kept for the volume preview
+  return blockSets(week, isPrimary ? 2 : 1, blockWeeks());
 }
-const rirForWeek = w => E_RIR[w] || 2;
-const E_RIR = { 1:4, 2:3, 3:2, 4:2, 5:5 };
+const rirForWeek = w => blockRir(w, blockWeeks());
+const deloadWeekNow = w => isDeload(w, blockWeeks());
 
 function deloadSignals() {
   const recent = S.sessions.slice(-2);
@@ -185,7 +189,7 @@ function render() {
   const wb = $('#weekBadge');
   wb.textContent = S.preview
     ? 'Wk ' + S.preview.week + ' \u00b7 ' + dayName(S.preview.day) + ' \u00b7 preview'
-    : 'Wk ' + S.week + ' \u00b7 ' + dayName(S.cur) + (S.week === 5 ? ' \u00b7 deload' : '');
+    : 'Wk ' + S.week + ' \u00b7 ' + dayName(S.cur) + (deloadWeekNow(S.week) ? ' \u00b7 deload' : '');
   wb.classList.toggle('previewing', !!S.preview);
   document.querySelectorAll('.tab').forEach(t =>
     t.setAttribute('aria-selected', String(t.dataset.view === current)));
@@ -244,7 +248,7 @@ views.train = root => {
   // band and the title falls back into the body — no broken icon, nothing to set.
   const head = el('div','card hero');
   const title = () => Object.assign(el('h2'), { textContent:
-    day.name + ' \u00b7 ' + (S.week === 5 ? 'Deload' : 'Week ' + S.week) });
+    day.name + ' \u00b7 ' + (deloadWeekNow(S.week) ? 'Deload' : 'Week ' + S.week) });
   const body = el('div','hero-body');
   const fig = S.profile.figure || 'male';
 
@@ -269,7 +273,7 @@ views.train = root => {
   }
 
   body.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
-  if (dl.deload && S.week !== 5) {
+  if (dl.deload && !deloadWeekNow(S.week)) {
     const a = el('div','alert warn');
     a.innerHTML = '<b>Early deload recommended</b>' + esc(dl.reason) + '. Cut the sets in half and back off the effort this session.';
     body.append(a);
@@ -329,13 +333,14 @@ views.train = root => {
 
 function weekBlurb(week) {
   const rir = rirForWeek(week);
-  if (week === 5) return 'Deload. One set a slot, five reps left in the tank, clean technique. You are not chasing anything this week.';
-  if (week === 1) return 'Six slots, one working set each, eight to twelve reps, ' + rir + ' left in the tank. Nothing near failure.';
-  if (week === 2) return 'Two sets on the three compound slots, one on the rest. ' + rir + ' reps left in the tank.';
-  return 'Two sets a slot, ' + rir + ' reps left in the tank. The engine adds a third only if a lift stalls.';
+  const n = blockWeeks();
+  if (deloadWeekNow(week)) return 'Deload, the last week of the block. Half the sets, five reps left in the tank, clean technique.';
+  if (week === 1) return 'Week 1 of ' + n + '. One set eased off each slot, ' + rir + ' reps left in the tank. Nothing near failure.';
+  if (week === n - 1) return 'The hardest week of the block. ' + rir + ' rep' + (rir === 1 ? '' : 's') + ' left in the tank. Deload next.';
+  return 'Week ' + week + ' of ' + n + '. ' + rir + ' reps left in the tank. The engine adds a set only if a lift stalls.';
 }
 
-function deloadCheckLocal() { return deloadCheck(S.week, deloadSignals()); }
+function deloadCheckLocal() { return deloadCheck(S.week, deloadSignals(), blockWeeks()); }
 
 const dayName = i => (S.days[i] && S.days[i].name) || 'Session';
 
@@ -348,7 +353,7 @@ function draftFor(p) {
 function liftRow(p, idx, week, preview) {
   const ex = byId(p.exId);
   const d = preview ? null : draftFor(p);
-  const planned = Math.max(p.sets, setsForWeek(week, p.primary));
+  const planned = setsThisWeek(week, p);
   const nSets = d && d.setsPlanned != null ? d.setsPlanned : planned;
   const logged = d ? d.sets.filter(x => x.reps).length : 0;
 
@@ -488,7 +493,7 @@ function openLift(p, idx, anchorEl) {
 
   function drawStep() {
     const ex = byId(p.exId);
-    const nSets = Math.max(p.sets, setsForWeek(S.week, p.primary));
+    const nSets = setsThisWeek(S.week, p);
     const rir = rirForWeek(S.week);
     inner.innerHTML = '';
 
@@ -599,7 +604,7 @@ function openLift(p, idx, anchorEl) {
       inner.append(r);
     }
     if (!shown) inner.append(Object.assign(el('p','tiny'), { textContent:
-      'No sets left on this lift. Add one back, or leave it and the lift is simply skipped this session.' }));
+      'No sets left on this lift. Add one back, or leave it and the lift is skipped this session.' }));
     if (sug.why) inner.append(Object.assign(el('p','tiny sugwhy'), { textContent: sug.why }));
 
     const addBtn = el('button','btn sm block ghost','+ Add set');
@@ -649,7 +654,7 @@ function openLift(p, idx, anchorEl) {
   function drawJoint(ex) {
     inner.append(el('div','q','Any joint pain?'));
     inner.append(Object.assign(el('div','qs'), { textContent:
-      'Muscle burn is fine, joints are not. Each level does something different: mild is noted, mild twice running offers a swap, moderate offers one now, sharp stops the lift.' }));
+      'Muscle burn is fine, joints are not. Mild is noted. Mild twice running offers a swap. Moderate offers one now. Sharp stops the lift.' }));
     const sev = optGroup(JOINT_LEVELS.map(j => [j.sev, j.label]),
       d.joint ? d.joint.sev : 0, v => {
         d.joint = v === 0 ? null : { sev: v, joint: (d.joint && d.joint.joint) || null };
@@ -972,7 +977,7 @@ function finishSession() {
   Object.keys(S.quarantine).forEach(id => { if (--S.quarantine[id] <= 0) delete S.quarantine[id]; });
   const wasLast = dayIdx === S.days.length - 1;
   S.cur = wasLast ? 0 : dayIdx + 1;
-  if (wasLast) S.week = S.week >= 5 ? 1 : S.week + 1;
+  if (wasLast) S.week = S.week >= blockWeeks() ? 1 : S.week + 1;
   S.draft = null;
   save();
 
@@ -1007,6 +1012,7 @@ function openMesoWizard(opts, anchorEl) {
   let step = onboarding ? 0 : 1;
   let days = (S.setup && S.setup.days) || 3;
   let minutes = (S.setup && S.setup.minutes) || 50;
+  let weeks = (S.setup && S.setup.weeks) || 8;
   let level = S.profile.level || 'inter';
   let goal = S.profile.goal || 'gain';
   let programId = S.profile.programId || 'fullclassic';
@@ -1025,7 +1031,15 @@ function openMesoWizard(opts, anchorEl) {
 
   function matches() {
     const m = programsFor({ level, days, minutes });
-    return m.length ? m : PROGRAMS.filter(p => p.levels.includes(level));
+    const list = m.length ? m : PROGRAMS.filter(p => p.levels.includes(level));
+    // You said build muscle. The ones that actually get the most muscles to ten
+    // hard sets a week, at the days and minutes you have, go to the top.
+    return list.map(pr => {
+      const sc = programScore({ programId: pr.id, days, minutes, level, goal, weeks }, EX, SUBS, SLOTS);
+      return { pr, clears: sc.clears, total: sc.total, lowest: sc.lowest };
+    }).sort((a, b) => goal === 'gain'
+      ? (b.clears - a.clears) || (b.lowest - a.lowest)
+      : 0);
   }
 
   function header(kicker, title) {
@@ -1087,7 +1101,7 @@ function openMesoWizard(opts, anchorEl) {
   }
 
   function draw() {
-    draft = buildProgram({ programId, days, minutes, level, goal }, EX, SUBS);
+    draft = buildProgram({ programId, days, minutes, level, goal, weeks }, EX, SUBS);
     inner.innerHTML = '';
     if (step === 0) drawYou();
     if (step === 1) drawSchedule();
@@ -1100,7 +1114,7 @@ function openMesoWizard(opts, anchorEl) {
   function drawYou() {
     header('First run', 'About you');
     inner.append(Object.assign(el('p','hint'), { textContent:
-      'Six answers. They set the starting loads, the protein target, the body-fat estimate and which programmes get offered. All of it is editable later in Settings and none of it leaves this device.' }));
+      'Six answers. They set the starting loads, the protein target, the body-fat estimate and which programmes are offered. Edit any of it later in Settings. None of it leaves this device.' }));
 
     inner.append(el('div','eyebrow','Header figure'));
     const figs = el('div','opts triple');
@@ -1144,7 +1158,7 @@ function openMesoWizard(opts, anchorEl) {
     if (!profileComplete(S.profile)) {
       inner.append(Object.assign(el('div','alert warn'), { innerHTML:
         '<b>Age, height and weight are needed before the rest works</b>' +
-        'They drive the protein target, the body-fat estimate and the rate-of-loss check. Without them those screens would show a confident wrong number rather than nothing, which is worse.' }));
+        'They drive the protein target, the body-fat estimate and the rate-of-loss check.' }));
     }
 
     inner.append(el('div','eyebrow','Units'));
@@ -1159,7 +1173,7 @@ function openMesoWizard(opts, anchorEl) {
 
     inner.append(el('div','eyebrow','Lifting experience'));
     inner.append(Object.assign(el('div','qs'), { textContent:
-      'This is the single answer that changes the programme most. It sets how much volume you start with and how hard a load increase is to earn.' }));
+      'The answer that changes the programme most. It sets your starting volume and how hard a load increase is to earn.' }));
     LEVELS.forEach(L => {
       const b = el('button','sheetrow' + (level === L.id ? ' cur' : ''));
       b.type = 'button';
@@ -1176,7 +1190,7 @@ function openMesoWizard(opts, anchorEl) {
 
   /* ---- step 1: schedule ---- */
   function drawSchedule() {
-    header(onboarding ? 'First run' : 'Five weeks, then a deload', 'Your schedule');
+    header(onboarding ? 'First run' : 'A block, then a deload', 'Your schedule');
 
     inner.append(el('div','eyebrow','Goal'));
     const gr = el('div','opts triple');
@@ -1208,11 +1222,37 @@ function openMesoWizard(opts, anchorEl) {
     });
     inner.append(mr);
 
-    const sh = sessionShape({ minutes, level, goal });
-    inner.append(Object.assign(el('div','alert good'), { innerHTML:
-      '<b>' + minutes + ' minutes buys about ' + sh.setBudget + ' working sets</b>' +
-      'So each session gets ' + sh.slotCount + ' lifts, ' + sh.setsPrimary + ' sets on the main ones and ' +
-      sh.setsOther + ' on the rest. Change the minutes and those numbers move with it, which is the whole point of asking.' }));
+    inner.append(el('div','eyebrow','Length of the block'));
+    const wr = el('div','opts triple');
+    BLOCK_LENGTHS.forEach(nn => {
+      const b = el('button','opt', nn + ' wk'); b.type = 'button';
+      b.setAttribute('aria-pressed', String(weeks === nn));
+      b.onclick = () => { weeks = nn; draw(); };
+      wr.append(b);
+    });
+    inner.append(wr);
+    inner.append(Object.assign(el('p','tiny'), { textContent:
+      weeks + ' weeks, the last one a deload. Effort ramps from ' + blockRir(1, weeks) +
+      ' reps left in the tank down to ' + blockRir(weeks - 1, weeks) + ' in week ' + (weeks - 1) + '.' }));
+
+    // Not an estimate: build every programme that fits this schedule and report
+    // the best result any of them actually achieves.
+    const cap = weekCapacity({ days, minutes, level, goal });
+    const best = matches().reduce((hi, m) => Math.max(hi, m.clears), 0);
+    const total = MAJOR_MUSCLES.length;
+    const box = el('div','alert ' + (goal !== 'gain' ? 'good' : best >= total ? 'good' : best >= total / 2 ? 'warn' : 'bad'));
+    let txt = '<b>' + days + ' days at ' + minutes + ' minutes is ' + cap.weeklySets + ' working sets a week</b>';
+    if (goal !== 'gain') {
+      txt += 'Enough to hold what you have and push the priorities.';
+    } else if (best >= total) {
+      txt += 'Enough to get all ' + total + ' major muscles to ten hard sets a week. Any of the top programmes will build across the board.';
+    } else {
+      txt += 'The best programme available at this schedule gets ' + best + ' of ' + total +
+             ' major muscles to ten hard sets a week. The rest hold at maintenance. ' +
+             'Add a day, or fifteen minutes, to close the gap.';
+    }
+    box.innerHTML = txt;
+    inner.append(box);
 
     nav(onboarding ? 0 : null, 2, 'See programmes');
   }
@@ -1221,21 +1261,32 @@ function openMesoWizard(opts, anchorEl) {
   function drawPrograms() {
     const list = matches();
     header(list.length + ' programmes fit', 'Pick a programme');
-    inner.append(Object.assign(el('p','hint'), { textContent:
-      'Filtered to ' + levelById(level).name.toLowerCase() + ', ' + days + ' days a week, ' + minutes +
-      ' minute sessions. Each one lays out differently across your days; the lifts inside are all swappable afterwards.' }));
-    if (!list.find(p => p.id === programId)) programId = list[0].id;
+    inner.append(Object.assign(el('p','hint'), { textContent: goal === 'gain'
+      ? 'Ranked by how many of the nine major muscles reach ten hard sets a week at ' + days +
+        ' days and ' + minutes + ' minutes. The lifts inside any of them are swappable afterwards.'
+      : 'Filtered to ' + levelById(level).name.toLowerCase() + ', ' + days + ' days a week, ' + minutes +
+        ' minute sessions. The lifts inside any of them are swappable afterwards.' }));
+    if (!list.find(x => x.pr.id === programId)) programId = list[0].pr.id;
 
-    list.forEach(pr => {
+    list.forEach(({ pr, clears, total }) => {
       const b = el('button','sheetrow' + (programId === pr.id ? ' cur' : ''));
       b.type = 'button';
       const t = el('div');
-      t.append(el('div','sheetrow-n', pr.name));
+      const n = el('div','sheetrow-n');
+      n.append(document.createTextNode(pr.name));
+      if (goal === 'gain') {
+        const tag = el('span','scoretag' + (clears >= total ? ' full' : clears >= total / 2 ? ' ok' : ''));
+        tag.textContent = clears + '/' + total;
+        n.append(tag);
+      }
+      t.append(n);
       t.append(el('div','sheetrow-m', pr.blurb));
       b.append(t);
       b.onclick = () => { programId = pr.id; draw(); };
       inner.append(b);
     });
+    if (goal === 'gain') inner.append(Object.assign(el('p','tiny'), { textContent:
+      'Ten hard sets a week is the floor the research supports for growth. Below it a muscle holds rather than grows.' }));
 
     nav(1, 3, 'Build it');
   }
@@ -1250,7 +1301,7 @@ function openMesoWizard(opts, anchorEl) {
     const L = levelById(level);
     inner.append(el('div','eyebrow','Hard sets per muscle, per week'));
     inner.append(Object.assign(el('div','qs'), { textContent:
-      'Counted fractionally: a press is a full set for the chest and half a set for the triceps and front delts. Your band at ' +
+      'Counted fractionally: a press is a full set for the chest, half for the triceps and front delts. Your band at ' +
       L.name.toLowerCase() + ' is ' + L.weekLow + ' to ' + L.weekHigh +
       '. Ten a week is the floor the research supports for growth; below that maintains rather than builds.' }));
     const vg = el('div','volgrid');
@@ -1272,14 +1323,15 @@ function openMesoWizard(opts, anchorEl) {
       .filter(([m, n]) => MAJOR_MUSCLES.indexOf(m) >= 0 && n < 10).length;
     const verdict = el('div','alert ' + (under === 0 ? 'good' : under <= 3 ? 'warn' : 'bad'));
     verdict.innerHTML = under === 0
-      ? '<b>Every muscle you train directly clears ten sets a week</b>This is a building programme. Your band at ' +
-        L.name.toLowerCase() + ' runs to ' + L.weekHigh + ', so there is room to add later if progress stalls.'
-      : '<b>' + under + ' muscle group' + (under === 1 ? '' : 's') + ' below ten sets a week</b>' +
+      ? '<b>Every major muscle clears ten sets a week</b>This builds across the board. Your band at ' +
+        L.name.toLowerCase() + ' runs to ' + L.weekHigh + ', so there is room to add if a lift stalls.'
+      : '<b>' + (MAJOR_MUSCLES.length - under) + ' of ' + MAJOR_MUSCLES.length +
+        ' major muscles clear ten sets a week</b>The rest hold at maintenance. ' +
         (days <= 2
-          ? 'Two days a week cannot reach ten sets for everything without very long sessions. That is a limit of the schedule, not a flaw in the plan. It will hold what you have and build the priorities slowly, which is a reasonable trade in a deficit.'
+          ? 'Two days a week buys the sets for that and no more.'
           : minutes <= 35
-          ? 'Thirty minute sessions buy about seven working sets. There is no arrangement of seven sets that gets every muscle to ten across ' + days + ' days. This is a maintain-and-nudge programme, which is the honest trade for the time.'
-          : 'Add a day or fifteen minutes, or pick a programme that emphasises them, and most of these clear the bar.');
+          ? 'Thirty minute sessions buy about seven working sets each. There is no arrangement of seven that reaches ten everywhere.'
+          : 'A day or fifteen minutes more closes most of the gap.');
     inner.append(verdict);
 
     inner.append(el('div','eyebrow','The sessions'));
@@ -1308,7 +1360,7 @@ function openMesoWizard(opts, anchorEl) {
     go.onclick = () => {
       if (!onboarding && !confirm('Replace your current programme and restart at week 1?\n\nLogged sessions and bodyweight history are kept.')) return;
       S.days = draft.map(d => ({ name: d.name, slots: d.slots }));
-      S.setup = { days, minutes };
+      S.setup = { days, minutes, weeks };
       S.profile.level = level; S.profile.goal = goal; S.profile.programId = programId;
       S.profile.onboarded = true;
       S.week = 1; S.cur = 0; S.draft = null; S.preview = null; S.lastSummary = null;
@@ -1319,7 +1371,7 @@ function openMesoWizard(opts, anchorEl) {
     back.onclick = () => { step = 2; draw(); };
     inner.append(go); inner.append(back);
     inner.append(Object.assign(el('p','tiny'), { textContent:
-      'Every lift can be swapped for another that trains the same muscles, body groups can be added to any day, and the order dragged around, once the block is running. Logged history and weigh-ins are never touched.' }));
+      'Once the block is running you can swap any lift, add a body group to any day, and drag the order around. Logged history and weigh-ins are never touched.' }));
   }
 }
 
@@ -1351,7 +1403,7 @@ function openAddSlot(dayIdx, anchorEl) {
 
     if (!slot) {
       inner.append(Object.assign(el('p','hint'), { textContent:
-        'This adds one slot to this session only. It counts toward the weekly sets the app tracks, but it does not change the planned volume of the lifts already there.' }));
+        'One slot, this session only. It counts toward your weekly sets. It does not change the planned volume of the lifts already there.' }));
       const already = new Set(S.days[dayIdx].slots.map(p => p.slot));
       SLOTS.forEach(sl => {
         const n = (SUBS[sl.id] || []).length;
@@ -1451,8 +1503,8 @@ function openPlanPicker(anchorEl) {
 
     inner.append(el('div','eyebrow','Week'));
     const wr = el('div','opts triple');
-    [1,2,3,4,5].forEach(n => {
-      const b = el('button','opt', n === 5 ? '5 \u00b7 deload' : String(n));
+    Array.from({ length: blockWeeks() }, (_, i) => i + 1).forEach(n => {
+      const b = el('button','opt', deloadWeekNow(n) ? n + ' \u00b7 deload' : String(n));
       b.type = 'button';
       b.setAttribute('aria-pressed', String(week === n));
       b.onclick = () => { week = n; draw(); };
@@ -1481,7 +1533,7 @@ function openPlanPicker(anchorEl) {
       b2.append(el('span','lift-n', byId(p.exId).name));
       r.append(b2);
       r.append(el('span','spacer'));
-      const n = Math.max(p.sets, setsForWeek(week, p.primary));
+      const n = setsThisWeek(week, p);
       r.append(Object.assign(el('span','lift-t'), {
         textContent: n + ' \u00d7 ' + p.repLow + '\u2013' + p.repHigh + ' @ ' + rirForWeek(week) + ' RIR' }));
       list.append(r);
@@ -1994,13 +2046,13 @@ views.settings = root => {
   });
   uw.append(ur);
   uw.append(Object.assign(el('p','tiny'), { textContent:
-    'Everything is stored in pounds and converted on the way in and out, so switching back and forth never rounds your history away.' }));
+    'Stored in pounds, converted on the way in and out. Switching back and forth never rounds your history away.' }));
   c.append(uw);
 
   const lw = el('div'); lw.style.margin = '0 0 12px';
   lw.append(el('div','lbl','Lifting experience'));
   lw.append(Object.assign(el('p','tiny'), { textContent:
-    'Sets your weekly set band and how hard a load increase is to earn. Novices can add weight most sessions, advanced lifters earn it over weeks.' }));
+    'Sets your weekly volume band and how hard a load increase is to earn. Novices add weight most sessions. Advanced lifters earn it over weeks.' }));
   LEVELS.forEach(L => {
     const b = el('button','sheetrow' + (S.profile.level === L.id ? ' cur' : ''));
     b.type = 'button';
@@ -2030,9 +2082,9 @@ views.settings = root => {
 
   const w = el('div','card');
   w.append(el('h2','','Mesocycle'));
-  w.append(el('p','hint','Week ' + S.week + ' of 5. Week 5 is a deload, then it resets.'));
+  w.append(el('p','hint','Week ' + S.week + ' of ' + blockWeeks() + '. The last week is a deload, then it resets.'));
   const r = el('div','row wrap');
-  [1,2,3,4,5].forEach(n => { const b = el('button','btn sm', 'Week ' + n);
+  Array.from({length: blockWeeks()}, (_, i) => i + 1).forEach(n => { const b = el('button','btn sm', 'Week ' + n);
     b.setAttribute('aria-pressed', String(S.week === n));
     b.onclick = () => { S.week = n; save(); render(); }; r.append(b); });
   w.append(r);
@@ -2043,10 +2095,10 @@ views.settings = root => {
   nm.onclick = () => openMesoWizard(null, nm);
   w.append(nm);
   w.append(Object.assign(el('p','tiny'), { textContent:
-    'Twenty-four programmes, filtered to your experience, days and session length. Currently running ' +
+    'Twenty-four programmes, ranked by how many muscles they get to ten hard sets a week at your schedule. Currently running ' +
     programById(S.profile.programId).name + ', ' +
     ((S.setup && S.setup.days) || S.days.length) + ' days a week at about ' +
-    ((S.setup && S.setup.minutes) || 50) + ' minutes. Change the minutes and the sets and reps change with them.' }));
+    ((S.setup && S.setup.minutes) || 50) + ' minutes, in a ' + blockWeeks() + ' week block.' }));
   root.append(w);
 
   const d = el('div','card');
@@ -2087,6 +2139,7 @@ views.settings = root => {
 };
 
 /* ---------------- boot ---------------- */
+setSlots(SLOTS);          // the engine needs the muscle map for its volume pass
 registerCustom();
 save();            // persist the seed so first-run state is durable
 applyTheme();

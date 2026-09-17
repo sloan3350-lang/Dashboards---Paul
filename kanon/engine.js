@@ -6,8 +6,33 @@
  * Pure functions, no DOM, so engine.test.js can run them in node.
  */
 
-const RIR_BY_WEEK = { 1: 4, 2: 3, 3: 2, 4: 2, 5: 5 };   // week 5 = deload
+/* The block is however many weeks you set it to. The last week is the deload.
+ * Effort ramps across the accumulation weeks: four reps in the tank at the start
+ * of the block down to one at the end, so the hardest week is the one before the
+ * deload rather than an arbitrary fixed schedule. */
+const RIR_BY_WEEK = { 1: 4, 2: 3, 3: 2, 4: 2, 5: 5 };   // legacy 5-week table
 const DELOAD_WEEK = 5;
+const BLOCK_LENGTHS = [4, 5, 6, 8, 10, 12];
+
+function blockRir(week, blockWeeks) {
+  const n = blockWeeks || DELOAD_WEEK;
+  if (week >= n) return 5;                       // deload
+  const acc = n - 1;                             // accumulation weeks
+  if (acc <= 1) return 3;
+  const t = (week - 1) / (acc - 1);              // 0 at week 1, 1 at the last hard week
+  return Math.max(1, Math.round(4 - t * 3));     // 4 -> 1
+}
+
+function isDeload(week, blockWeeks) { return week >= (blockWeeks || DELOAD_WEEK); }
+
+/* Sets per slot for a given week. Week 1 eases in, the deload halves, and the
+ * middle of the block carries the planned volume. */
+function blockSets(week, planned, blockWeeks) {
+  const n = blockWeeks || DELOAD_WEEK;
+  if (isDeload(week, n)) return Math.max(1, Math.floor(planned / 2));
+  if (week === 1) return Math.max(1, planned - 1);
+  return planned;
+}
 const SETS_CAP_PER_SLOT = 4;
 
 /* ---------- per-exercise load progression ---------- */
@@ -88,8 +113,8 @@ function substitute(exId, joint, quarantined, EX, SUBS) {
 }
 
 /* ---------- deload ---------- */
-function deloadCheck(week, signals) {
-  if (week % DELOAD_WEEK === 0)
+function deloadCheck(week, signals, blockWeeks) {
+  if (isDeload(week, blockWeeks))
     return { deload: true, reason: 'scheduled deload week' };
   const hits = [];
   if (signals.perfDownLifts >= 3)      hits.push('performance down on three or more lifts');
@@ -451,42 +476,137 @@ function programsFor({ level, days, minutes }) {
 
 function programById(id) { return PROGRAMS.find(p => p.id === id) || PROGRAMS[1]; }
 
+/* How well a programme actually delivers on the goal, given the days and minutes
+ * available. Used to rank the library: if you said build muscle, the programmes
+ * that get the most muscles to ten hard sets a week come first. */
+function programScore(opts, EX, SUBS, SLOTS) {
+  try {
+    const plan = buildProgram(opts, EX, SUBS);
+    const v = muscleVolume(plan, SLOTS);
+    const clears = MAJOR_MUSCLES.filter(m => (v[m] || 0) >= 10).length;
+    const lowest = MAJOR_MUSCLES.reduce((lo, m) => Math.min(lo, v[m] || 0), 99);
+    return { clears, total: MAJOR_MUSCLES.length, lowest, volume: v, plan };
+  } catch (e) {
+    return { clears: 0, total: MAJOR_MUSCLES.length, lowest: 0, volume: {}, plan: [] };
+  }
+}
+
+/* What a week of this length and frequency can support at all, regardless of
+ * which programme is chosen. Answering this before the programme is picked is
+ * the difference between steering and scolding. */
+function weekCapacity({ days, minutes, level, goal }) {
+  const shape = sessionShape({ minutes, level, goal });
+  const weeklySets = shape.setBudget * days;
+  // Nine major muscles at ten fractional sets is the full-coverage bill. Compound
+  // lifts pay part of it twice, so the practical figure is about 0.7 of that.
+  const needed = Math.round(MAJOR_MUSCLES.length * 10 * 0.7);
+  return { weeklySets, needed, canCoverAll: weeklySets >= needed,
+           coverable: Math.max(1, Math.floor(weeklySets / 7)) };
+}
+
 function equipFilter(mode) {
   if (mode === 'machine') return e => e.equip === 'machine' || e.equip === 'cable';
   if (mode === 'free')    return e => e.equip === 'db' || e.equip === 'bar' || e.equip === 'rack' || e.equip === 'bw';
   return () => true;
 }
 
-/* Build a concrete plan: the programme's split laid out over the chosen days,
-   trimmed to the time available, with sets that follow the time budget. */
-function buildProgram({ programId, days, minutes, level, goal }, EX, SUBS) {
+/* Build a concrete plan.
+ *
+ * The session is filled against a TIME budget, not a fixed number of lifts, and
+ * the aim is coverage: on a full-body programme every muscle group gets touched
+ * if the clock allows, and what drops first is the accessory work, not the arms.
+ * Picking "build muscle" then means what it says — leftover minutes are spent
+ * lifting the muscles that are furthest below ten hard sets a week, rather than
+ * being left on the table and reported back as a shortfall. */
+function buildProgram({ programId, days, minutes, level, goal, weeks }, EX, SUBS) {
   const pr = programById(programId);
   const shape = sessionShape({ minutes, level, goal });
   const ok = equipFilter(pr.equip);
   const layout = SPLITS[pr.split](days);
   const used = new Set();
-  return layout.map(day => {
-    const wanted = day.slots.concat(pr.emphasis).slice(0, shape.slotCount);
+  const budget = shape.setBudget;
+  // Full body spends its time on breadth: every pattern, fewer sets each.
+  // A split already trains each muscle twice a week, so it can afford depth.
+  const breadth = pr.split === 'full';
+
+  const built = layout.map(day => {
+    const wanted = dedupe(day.slots.concat(pr.emphasis));
+    let spent = 0;
     const slots = [];
     wanted.forEach((slot, i) => {
-      const pool = (SUBS[slot] || []).map(id => EX.find(e => e.id === id))
-        .filter(e => e && ok(e));
+      const pool = (SUBS[slot] || []).map(id => EX.find(e => e.id === id)).filter(e => e && ok(e));
       const ex = pool.find(e => !used.has(e.id)) || pool[0];
       if (!ex) return;
-      used.add(ex.id);
       const iso = MIN_PER_SET(slot) < 3;
-      const primary = i < 3 && !iso;
-      slots.push({ slot, exId: ex.id,
-                   sets: primary ? shape.setsPrimary : shape.setsOther,
+      const primary = !breadth && i < 3 && !iso;
+      const n = breadth ? Math.max(2, shape.setsOther)
+                        : (primary ? shape.setsPrimary : shape.setsOther);
+      const cost = n * MIN_PER_SET(slot);
+      if (spent + cost > budget * 3.0 && slots.length >= 3) return;   // out of time
+      used.add(ex.id);
+      slots.push({ slot, exId: ex.id, sets: n,
                    repLow:  iso ? shape.isoLow  : shape.repLow,
                    repHigh: iso ? shape.isoHigh : shape.repHigh,
-                   load: null, misses: 0, primary });
+                   load: null, misses: 0, primary: primary || (breadth && !iso && i < 3) });
+      spent += cost;
     });
-    const mins = Math.round(WARMUP_MIN +
-      slots.reduce((t, s) => t + s.sets * MIN_PER_SET(s.slot), 0));
-    return { name: day.name, slots, minutes: mins };
+    return { name: day.name, slots, spent };
   });
+
+  // Building muscle: spend whatever time is left on the muscles furthest below
+  // ten sets a week, biggest shortfall first, until the clock runs out.
+  if (goal === 'gain') topUp(built, budget * 3.0, SLOTS_FOR_MUSCLE);
+
+  return built.map(d => ({
+    name: d.name, slots: d.slots,
+    minutes: Math.round(WARMUP_MIN + d.slots.reduce((t, s) => t + s.sets * MIN_PER_SET(s.slot), 0))
+  }));
 }
+
+function dedupe(list) {
+  const seen = {}, out = [];
+  list.forEach(x => { seen[x] = (seen[x] || 0) + 1; if (seen[x] <= 2) out.push(x); });
+  return out;
+}
+
+/* Which slots feed which muscle, for the top-up pass. */
+const SLOTS_FOR_MUSCLE = {
+  quads:['squat','unilat'], glutes:['hinge','unilat','squat'], hams:['hinge','unilat'],
+  chest:['hpress'], lats:['vpull'], midback:['hpull'], sidedelt:['vpress'],
+  biceps:['biceps','vpull','hpull'], triceps:['triceps','hpress','vpress'],
+  calves:['calves'], abs:['core']
+};
+
+function topUp(built, budgetMin, map) {
+  if (!SLOTS_REF) return;
+  for (let guard = 0; guard < 60; guard++) {
+    const v = muscleVolume(built.map(d => ({ slots: d.slots })), SLOTS_REF);
+    const short = MAJOR_MUSCLES
+      .map(m => ({ m, gap: 10 - (v[m] || 0) }))
+      .filter(x => x.gap > 0)
+      .sort((a, b) => b.gap - a.gap)[0];
+    if (!short) return;
+    // find the day with the most time left that carries a slot feeding it
+    let best = null;
+    built.forEach(d => {
+      (map[short.m] || []).forEach(slot => {
+        const p = d.slots.find(x => x.slot === slot);
+        if (!p || p.sets >= SETS_CAP_PER_SLOT) return;
+        const after = d.spent + MIN_PER_SET(slot);
+        if (after > budgetMin) return;
+        if (!best || after < best.after) best = { d, p, slot, after };
+      });
+    });
+    if (!best) return;                       // no time and no room left
+    best.p.sets += 1;
+    best.d.spent = best.after;
+  }
+}
+
+/* SLOTS is passed in from data.js at call time; keep a module-level handle so the
+ * top-up pass can read muscle mappings without threading it through. */
+let SLOTS_REF = null;
+function setSlots(SLOTS) { SLOTS_REF = SLOTS; }
 
 /* ---------------- joint policy ----------------
    Four levels, each with a different consequence. Mild is allowed to pass once;
@@ -504,14 +624,14 @@ function jointAction(sev, joint, priorMildRun) {
   if (sev === 1) {
     if (priorMildRun >= 1) return { action:'swap', force:false,
       title:'Second session running with mild pain here',
-      body:'Mild once is noise. Twice in a row on the same joint is a pattern, and it gets worse from here if nothing changes. Swapping to a lift that loads this joint less is the cheap fix now.' };
+      body:'Mild once is noise. Twice running on the same joint is a pattern. Swap to a lift that loads it less.' };
     return { action:'note',
       title:'Logged, carry on',
-      body:'Mild once is not a reason to change anything. If it shows up again next session on the same joint, the app will offer a swap.' };
+      body:'Mild once changes nothing. If it returns next session on the same joint, you get offered a swap.' };
   }
   if (sev === 2) return { action:'swap', force:false,
     title:'Swap this lift',
-    body:'Moderate joint pain during a working set is the point where continuing costs more than it buys. Same muscle, less load on the joint.' };
+    body:'Moderate pain during a working set costs more than it buys. Same muscle, less load on the joint.' };
   return { action:'stop', force:true,
     title:'Stop training this joint today',
     body:'Sharp pain is not something to train through. This lift is out for the next three sessions and comes back for a retest after that. If it is still sharp in a week, that is a clinician’s call, not an app’s.' };
@@ -601,7 +721,8 @@ function muscleVolume(days, SLOTS, setsOf) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { muscleVolume, MUSCLE_NAME, MAJOR_MUSCLES, LEVELS, levelById, loadStep, sessionShape, PROGRAMS, programsFor,
+  module.exports = { programScore, weekCapacity, setSlots, muscleVolume, MUSCLE_NAME, MAJOR_MUSCLES,
+                     BLOCK_LENGTHS, blockRir, isDeload, blockSets, LEVELS, levelById, loadStep, sessionShape, PROGRAMS, programsFor,
                      programById, buildProgram, jointAction, mildRun, JOINT_LEVELS,
                      toUnit, fromUnit, unitStep, suggestSet, SPLITS,
                      nextLoad, volumeDecision, substitute, deloadCheck, navyBodyFat,
