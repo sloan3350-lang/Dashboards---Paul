@@ -313,7 +313,7 @@ views.train = root => {
   // usual reasons; the picker covers every slot in the library.
   const add = el('button','btn sm block ghost','+ Add a lift to this session');
   add.style.marginTop = '2px';
-  add.onclick = () => openAddSlot(dayIdx);
+  add.onclick = () => openAddSlot(dayIdx, add);
   root.append(add);
 
   const fin = el('button','btn primary block','Finish session');
@@ -356,8 +356,8 @@ function liftRow(p, idx, week, preview) {
   if (!preview) {
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
-    row.onclick = () => openLift(p, idx);
-    row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLift(p, idx); } };
+    row.onclick = () => openLift(p, idx, row);
+    row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLift(p, idx, row); } };
   }
 
   if (!preview) {
@@ -399,7 +399,7 @@ function liftRow(p, idx, week, preview) {
     sw.title = 'Swap ' + ex.name + ' for another lift that trains the same muscles';
     sw.setAttribute('aria-label', sw.title);
     sw.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11l-3-3M17 13H6l3 3"/></svg>';
-    sw.onclick = e => { e.stopPropagation(); openSwap(p, () => render()); };
+    sw.onclick = e => { e.stopPropagation(); openSwap(p, () => render(), row); };
     row.append(sw);
   }
   // Only show a status glyph when there is one. The grip and swap control
@@ -471,7 +471,7 @@ function makeReorderable(list, plan) {
 }
 
 /* ---- one lift at a time: log the sets, then the questions in sequence ---- */
-function openLift(p, idx) {
+function openLift(p, idx, anchorEl) {
   closeSheet();
   const d = draftFor(p);
   let step = 0;                       // 0 sets · 1 engagement · 2 recovery · 3 joint
@@ -483,9 +483,7 @@ function openLift(p, idx) {
   sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
   const inner = el('div','sheet-inner');
   sheetEl.append(inner);
-  document.body.append(sheetEl);
-  document.body.style.overflow = 'hidden';
-  document.addEventListener('keydown', onSheetKey);
+  mountSheet(anchorEl);
   drawStep();
 
   function drawStep() {
@@ -549,7 +547,7 @@ function openLift(p, idx) {
     tools.append(vid);
     const sw = el('button','btn sm ghost','Swap lift');
     sw.title = 'Replace this with another lift that trains the same muscles';
-    sw.onclick = () => openSwap(p, () => openLift(p, idx));
+    sw.onclick = () => openSwap(p, () => openLift(p, idx, anchorEl), anchorEl);
     tools.append(sw);
     inner.append(tools);
 
@@ -771,12 +769,45 @@ function applySwap(p, exId, onDone) {
 
 let sheetEl = null;
 function closeSheet() {
-  if (sheetEl) { sheetEl.remove(); sheetEl = null; document.body.style.overflow = ''; }
+  if (sheetEl) { sheetEl.remove(); sheetEl = null; }
   document.removeEventListener('keydown', onSheetKey);
+}
+
+/* Put a sheet into the document at the vertical position of whatever opened it.
+ * The element that opened it was on screen when it was tapped, so the panel
+ * lands in view without the app needing to know where the viewport is — which
+ * it cannot know inside a frame that is sized to its own content. Nothing is
+ * scroll-locked; the page keeps working underneath. */
+let lastTapY = null;
+document.addEventListener('pointerdown', e => {
+  const r = e.target && e.target.getBoundingClientRect && e.target.getBoundingClientRect();
+  if (r) lastTapY = r.top + docScroll();
+}, true);
+
+function docScroll() {
+  return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+}
+
+function mountSheet(anchorEl) {
+  document.body.append(sheetEl);
+  let top;
+  if (anchorEl && anchorEl.getBoundingClientRect) {
+    top = anchorEl.getBoundingClientRect().top + docScroll();
+  } else if (lastTapY != null) {
+    top = lastTapY;
+  } else {
+    top = docScroll();
+  }
+  sheetEl.style.top = Math.max(8, Math.round(top) - 6) + 'px';
+  document.addEventListener('keydown', onSheetKey);
+  // Bring it into view in whichever container is actually doing the scrolling.
+  requestAnimationFrame(() => {
+    try { sheetEl.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) {}
+  });
 }
 function onSheetKey(e) { if (e.key === 'Escape') closeSheet(); }
 
-function openSwap(p, onDone) {
+function openSwap(p, onDone, anchorEl) {
   closeSheet();
   const slot = SLOTS.find(s => s.id === p.slot);
   const order = (SUBS[p.slot] || []).slice();
@@ -851,9 +882,7 @@ function openSwap(p, onDone) {
   inner.append(cwrap);
 
   sheetEl.append(inner);
-  document.body.append(sheetEl);
-  document.body.style.overflow = 'hidden';
-  document.addEventListener('keydown', onSheetKey);
+  mountSheet(anchorEl);
   x.focus();
 }
 
@@ -972,7 +1001,7 @@ const SLOT_MUSCLE = { squat:'Quads', hpress:'Chest', vpull:'Lats', hinge:'Hams &
                       hpull:'Mid-back', vpress:'Delts', arms:'Arms', calves:'Calves', core:'Core',
                       biceps:'Biceps', triceps:'Triceps', unilat:'Single leg' };
 
-function openMesoWizard(opts) {
+function openMesoWizard(opts, anchorEl) {
   closeSheet();
   const onboarding = !!(opts && opts.onboarding);
   let step = onboarding ? 0 : 1;
@@ -990,9 +1019,8 @@ function openMesoWizard(opts) {
   if (!onboarding) sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
   const inner = el('div','sheet-inner');
   sheetEl.append(inner);
-  document.body.append(sheetEl);
-  document.body.style.overflow = 'hidden';
-  if (!onboarding) document.addEventListener('keydown', onSheetKey);
+  mountSheet(anchorEl);
+  if (onboarding) document.removeEventListener('keydown', onSheetKey);
   draw();
 
   function matches() {
@@ -1296,7 +1324,7 @@ function openMesoWizard(opts) {
 }
 
 /* ---- add a body group, then a lift for it, to one session ---- */
-function openAddSlot(dayIdx) {
+function openAddSlot(dayIdx, anchorEl) {
   closeSheet();
   let slot = null;
   sheetEl = el('div','sheet');
@@ -1306,9 +1334,7 @@ function openAddSlot(dayIdx) {
   sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
   const inner = el('div','sheet-inner');
   sheetEl.append(inner);
-  document.body.append(sheetEl);
-  document.body.style.overflow = 'hidden';
-  document.addEventListener('keydown', onSheetKey);
+  mountSheet(anchorEl);
   draw();
 
   function draw() {
@@ -1395,7 +1421,7 @@ function openAddSlot(dayIdx) {
 }
 
 /* ---- week / session picker ---- */
-function openPlanPicker() {
+function openPlanPicker(anchorEl) {
   closeSheet();
   let week = S.preview ? S.preview.week : S.week;
   let dayIdx = S.preview ? S.preview.day : S.cur;
@@ -1407,9 +1433,7 @@ function openPlanPicker() {
   sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
   const inner = el('div','sheet-inner');
   sheetEl.append(inner);
-  document.body.append(sheetEl);
-  document.body.style.overflow = 'hidden';
-  document.addEventListener('keydown', onSheetKey);
+  mountSheet(anchorEl);
   draw();
 
   function draw() {
@@ -2016,7 +2040,7 @@ views.settings = root => {
     'Which session is next is set from the week badge at the top of the screen.' }));
   const nm = el('button','btn primary block','Build a new mesocycle');
   nm.style.marginTop = '12px';
-  nm.onclick = () => openMesoWizard();
+  nm.onclick = () => openMesoWizard(null, nm);
   w.append(nm);
   w.append(Object.assign(el('p','tiny'), { textContent:
     'Twenty-four programmes, filtered to your experience, days and session length. Currently running ' +
@@ -2066,7 +2090,7 @@ views.settings = root => {
 registerCustom();
 save();            // persist the seed so first-run state is durable
 applyTheme();
-$('#weekBadge').onclick = openPlanPicker;
+$('#weekBadge').onclick = () => openPlanPicker($('#weekBadge'));
 $('#themeBtn').onclick = () => {
   S.profile.theme = S.profile.theme === 'light' ? 'dark' : 'light';
   save(); applyTheme();
@@ -2075,6 +2099,8 @@ render();
 // A first run asks who is lifting before showing a programme built for someone
 // else. Anyone with history already skips this.
 if (!S.profile.onboarded && !(S.sessions && S.sessions.length)) openMesoWizard({ onboarding: true });
-if ('serviceWorker' in navigator) {
+// Only the installable build ships a service worker. The embedded build has no
+// manifest and no sw.js, and asking for one there just logs a 404.
+if ('serviceWorker' in navigator && document.querySelector('link[rel="manifest"]')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }

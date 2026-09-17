@@ -27,8 +27,7 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans);
-     -webkit-text-size-adjust:100%;
-     padding-bottom:calc(var(--tabbar) + env(safe-area-inset-bottom,0px))}
+     -webkit-text-size-adjust:100%}
 h1,h2,h3{font-family:var(--serif);font-weight:600;margin:0;text-wrap:balance}
 button{font:inherit;color:inherit;cursor:pointer}
 a.btn{color:var(--ink);text-decoration:none;display:inline-flex;align-items:center}
@@ -115,14 +114,20 @@ section{display:flex;flex-direction:column;gap:13px}
 .lastline .why{color:var(--accent);font-variant-numeric:normal}
 
 /* ---------- sheet ---------- */
-.sheet{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.66);
-       display:flex;align-items:flex-end;justify-content:center;
-       padding-top:env(safe-area-inset-top,0px);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
-.sheet-inner{background:var(--surface);border:1px solid var(--line);border-radius:14px 14px 0 0;
-             width:100%;max-width:680px;max-height:90vh;overflow-y:auto;
-             padding:18px 16px calc(22px + env(safe-area-inset-bottom,0px));
-             box-shadow:0 -10px 40px rgba(0,0,0,.5);animation:up .18s ease-out}
-@keyframes up{from{transform:translateY(18px);opacity:.4}to{transform:none;opacity:1}}
+/* Sheets are anchored panels, not viewport overlays.
+ * This app is embedded in a frame that is sized to its content, so `innerHeight`
+ * is the height of the whole document, not of the screen. Anything positioned
+ * against the viewport lands at the bottom of the content instead of the bottom
+ * of the screen, which is off-screen. So a sheet is positioned in DOCUMENT space
+ * at the row that opened it, which is by definition somewhere the reader is
+ * already looking, and the page keeps scrolling normally underneath. */
+.sheet{position:absolute;left:0;right:0;z-index:60;
+       display:flex;justify-content:center;padding:0 10px}
+.sheet-inner{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+             width:100%;max-width:680px;
+             padding:18px 16px 22px;
+             box-shadow:0 18px 50px rgba(0,0,0,.55);animation:up .18s ease-out}
+@keyframes up{from{transform:translateY(10px);opacity:.4}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.sheet-inner{animation:none}}
 .sheet-h{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
 .sheet-h h2{font-size:24px;margin-top:1px;line-height:1.1}
@@ -224,12 +229,18 @@ input::placeholder{color:var(--muted);opacity:.55;font-weight:400}
 .chart{width:100%;height:auto;display:block;margin-top:14px}
 
 /* ---------- tab bar ---------- */
-.tabs{position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;background:var(--surface);
-      border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
-.tab{flex:1;border:0;background:none;padding:9px 2px 8px;font-size:8.5px;letter-spacing:.13em;
-     text-transform:uppercase;color:var(--muted);min-height:var(--tabbar);
-     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px}
-.tab svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.5}
+/* The nav rides inside the sticky header rather than sitting at the bottom of
+ * the page. A bar pinned to the bottom of the screen needs to know where the
+ * screen is, and inside a frame that is sized to its own content there is no
+ * such thing: `fixed` lands at the bottom of the document, and `sticky` has no
+ * room to stick because the page ends at the bar. Under the brand row it is
+ * always one tap away, whatever the frame does. */
+.tabs{display:flex;background:transparent;border-top:1px solid var(--line);
+      margin:11px -16px -12px;padding:0 4px}
+.tab{flex:1;border:0;background:none;padding:8px 2px 7px;font-size:8.5px;letter-spacing:.13em;
+     text-transform:uppercase;color:var(--muted);min-height:52px;
+     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.tab svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.5}
 .tab[aria-selected="true"]{color:var(--accent);font-weight:700}
 .empty{text-align:center;color:var(--muted);font-size:13.5px;padding:26px 14px}
 .tiny{font-size:11.5px;color:var(--muted);line-height:1.6;margin:10px 0 0}
@@ -321,16 +332,19 @@ input::placeholder{color:var(--muted);opacity:.55;font-weight:400}
 }
 
 body{
+  position:relative;
   background:
     radial-gradient(48% 34% at 10% 4%,  var(--veil),   transparent 60%),
     radial-gradient(40% 30% at 92% 16%, var(--veil-2), transparent 62%),
     radial-gradient(60% 45% at 72% 92%, var(--veil),   transparent 58%),
     var(--bg);
-  background-attachment:fixed;
 }
 /* blurred veining — the thing the glass actually refracts */
 body::after{
-  content:"";position:fixed;inset:-25%;pointer-events:none;z-index:0;
+  /* Bleed vertically only. When this was fixed it was clipped to the viewport;
+   absolute, a negative horizontal inset becomes real page width and the
+   whole app scrolls sideways by a quarter of a screen. */
+  content:"";position:absolute;inset:-25% 0;pointer-events:none;z-index:0;
   background:
     radial-gradient(closest-side at 22% 28%, rgba(255,255,255,.10), transparent 70%),
     radial-gradient(closest-side at 78% 66%, var(--veil), transparent 70%);
@@ -338,7 +352,7 @@ body::after{
 }
 /* fine grain so large flat areas are not dead */
 body::before{
-  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:var(--grain);
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:0;opacity:var(--grain);
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");
 }
 /* Raise the chrome above the body veil and grain WITHOUT touching how any of it
@@ -347,16 +361,29 @@ body::before{
  * overlay into an in-flow block a thousand pixels down the page. Only `main`
  * needs a position at all; the other three already create a stacking context. */
 main{position:relative;z-index:1}
-.top{z-index:20}.tabs{z-index:30}.sheet{z-index:60}
+.top{z-index:20}.sheet{z-index:60}
 
-.card,.sheet-inner,.tabs,.top,.stat,.volcell,.daycard,.sheetrow,.lastline{
+.card,.stat,.volcell,.daycard,.sheetrow,.lastline{
   background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02)),var(--glass-2);
   border-top-color:var(--glass-edge);
   -webkit-backdrop-filter:blur(var(--blur)) saturate(var(--sat));
   backdrop-filter:blur(var(--blur)) saturate(var(--sat));
 }
-.card,.sheet-inner{box-shadow:0 10px 34px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.10)}
-.top{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.01)),var(--glass-2),var(--glow)}
+.card{box-shadow:0 10px 34px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.10)}
+/* A sheet sits directly on the page now, with no dimmed backdrop behind it, so
+ * it has to be opaque. Frosted glass over live content is unreadable. */
+.sheet-inner{
+  background:var(--surface);
+  border-top-color:var(--glass-edge);
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+}
+
+/* The header is the only chrome content scrolls under, so it has to be solid.
+ * Frosted glass over moving text is a smear, not a material. */
+.top{background:var(--surface),var(--glow);background-color:var(--surface);
+     -webkit-backdrop-filter:none;backdrop-filter:none;
+     box-shadow:0 6px 18px rgba(0,0,0,.30)}
+:root[data-theme="light"] .top{box-shadow:0 6px 18px rgba(11,11,12,.08)}
 .btn,input[type=number],input[type=text],input[type=date],select,.opt{
   -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 .hero.noimg .hero-ov{background:linear-gradient(180deg,rgba(255,255,255,.05),transparent)}
@@ -364,11 +391,11 @@ main{position:relative;z-index:1}
 /* Safari/Firefox without backdrop-filter, and anyone who asked for less
    transparency, get a solid panel instead of an unreadable wash. */
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .card,.sheet-inner,.tabs,.top,.stat,.volcell,.daycard,.sheetrow,.lastline{
+  .card,.stat,.volcell,.daycard,.sheetrow,.lastline{
     background:var(--surface);}
 }
 @media (prefers-reduced-transparency:reduce){
-  .card,.sheet-inner,.tabs,.top,.stat,.volcell,.daycard,.sheetrow,.lastline,
+  .card,.sheet-inner,.stat,.volcell,.daycard,.sheetrow,.lastline,
   .btn,input,select,.opt{
     background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none}
   body::before,body::after{display:none}
