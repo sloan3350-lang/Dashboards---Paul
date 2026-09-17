@@ -93,5 +93,105 @@ ok('three weigh-ins over eight days is NOT enough, no rate flag shown', sparse.r
 ok('a 2%/wk drop is flagged as costing lean mass', E.lossFlag(2.0, -4).level === 'fast');
 ok('a 0.6%/wk drop reads as healthy', E.lossFlag(0.6, -1.3).level === 'good');
 
+/* ---------------- training age, time, programmes, joints, units ---------------- */
+
+ok('four training ages, ordered from new to advanced',
+   E.LEVELS.length === 4 && E.LEVELS[0].id === 'new' && E.LEVELS[3].id === 'adv');
+ok('an unknown level falls back to intermediate rather than throwing',
+   E.levelById('nonsense').id === 'inter');
+
+const bench2 = D.EX.find(e => e.id === 'machchest');
+const press2 = D.EX.find(e => e.id === 'legpress');
+ok('a beginner takes a smaller jump on an upper-body lift than an intermediate',
+   E.loadStep(bench2, 'new') < E.loadStep(bench2, 'inter'));
+ok('upper-body jumps stay inside the NSCA 2.5 to 10 lb range',
+   E.loadStep(bench2, 'new') >= 2.5 && E.loadStep(bench2, 'adv') <= 10);
+ok('lower-body jumps stay inside the NSCA 5 to 15 lb range',
+   E.loadStep(press2, 'new') >= 5 && E.loadStep(press2, 'adv') <= 15);
+
+// A novice clears the bar a rep or two short of the top; an advanced lifter does not.
+const shortOfTop = [{ reps: 11, rir: 2, load: 100 }];
+const tgt2 = { repLow: 8, repHigh: 12, rir: 2, load: 100 };
+ok('a novice progresses on 11 of a 8 to 12 range at target effort',
+   E.nextLoad(shortOfTop, tgt2, bench2, 0, 'novice').load > 100);
+ok('an advanced lifter does not progress until the whole range is cleared',
+   E.nextLoad(shortOfTop, tgt2, bench2, 0, 'adv').load === 100);
+ok('everyone progresses once the top of the range is hit',
+   E.nextLoad([{ reps: 12, rir: 2, load: 100 }], tgt2, bench2, 0, 'adv').load > 100);
+
+const s30 = E.sessionShape({ minutes: 30, level: 'inter', goal: 'gain' });
+const s60 = E.sessionShape({ minutes: 60, level: 'inter', goal: 'gain' });
+const s90 = E.sessionShape({ minutes: 90, level: 'inter', goal: 'gain' });
+ok('a longer session buys more lifts', s30.slotCount < s60.slotCount && s60.slotCount <= s90.slotCount);
+ok('a longer session buys more sets on the main lifts', s30.setsPrimary < s90.setsPrimary);
+ok('cutting holds volume back rather than chasing it',
+   E.sessionShape({ minutes: 60, level: 'inter', goal: 'cut' }).setsPrimary < s60.setsPrimary);
+
+let thin = 0;
+['new','novice','inter','adv'].forEach(l => [2,3,4,5,6].forEach(d => [30,45,60,75].forEach(m => {
+  if (E.programsFor({ level: l, days: d, minutes: m }).length < 10) thin++;
+})));
+ok('every level, day count and session length offers at least ten programmes', thin === 0);
+ok('the library is more than twenty programmes', E.PROGRAMS.length >= 20);
+ok('an unknown programme id falls back rather than throwing', !!E.programById('nope').name);
+
+const built = E.buildProgram({ programId:'ul', days:4, minutes:60, level:'inter', goal:'gain' }, D.EX, D.SUBS);
+ok('building a four-day programme returns four sessions', built.length === 4);
+ok('every slot gets a real exercise', built.every(d => d.slots.every(p => !!D.byId(p.exId))));
+ok('no exercise is repeated across the week', (() => {
+  const all = built.flatMap(d => d.slots.map(p => p.exId));
+  return new Set(all).size === all.length;
+})());
+ok('a machines-only programme contains no barbells', (() => {
+  const m = E.buildProgram({ programId:'machineonly', days:3, minutes:50, level:'novice', goal:'gain' }, D.EX, D.SUBS);
+  return m.every(d => d.slots.every(p => ['machine','cable'].includes(D.byId(p.exId).equip)));
+})());
+ok('a free-weights programme contains no machines', (() => {
+  const f = E.buildProgram({ programId:'freeweight', days:3, minutes:60, level:'inter', goal:'gain' }, D.EX, D.SUBS);
+  return f.every(d => d.slots.every(p => !['machine','cable'].includes(D.byId(p.exId).equip)));
+})());
+
+const vol2 = E.muscleVolume(built, D.SLOTS);
+ok('a press counts a full set for the chest and half for the triceps',
+   vol2.chest > 0 && vol2.triceps > 0);
+ok('volume is reported per muscle, not per slot', !!vol2.biceps && vol2.quads > 0);
+
+ok('mild pain the first time is noted, not acted on', E.jointAction(1, 'shoulder', 0).action === 'note');
+ok('mild pain a second session running offers a swap', E.jointAction(1, 'shoulder', 1).action === 'swap');
+ok('moderate pain offers a swap immediately', E.jointAction(2, 'shoulder', 0).action === 'swap');
+ok('sharp pain stops the lift and is not optional',
+   E.jointAction(3, 'shoulder', 0).action === 'stop' && E.jointAction(3, 'shoulder', 0).force === true);
+ok('no pain means no action', E.jointAction(0, null, 0).action === 'none');
+
+const hist2 = [
+  { entries: [{ slot:'hpress', joint: { sev:1, joint:'shoulder' } }] },
+  { entries: [{ slot:'hpress', joint: { sev:1, joint:'shoulder' } }] }
+];
+ok('two consecutive mild sessions on the same joint count as a run of two',
+   E.mildRun(hist2, 'hpress', 'shoulder') === 2);
+ok('a clean session in between resets the run',
+   E.mildRun([hist2[0], { entries: [{ slot:'hpress', joint: null }] }], 'hpress', 'shoulder') === 0);
+ok('a mild complaint in a different joint does not count',
+   E.mildRun(hist2, 'hpress', 'knee') === 0);
+
+ok('225 lb reads as 102.1 kg', E.toUnit(225, 'kg') === 102.1);
+ok('pounds pass through untouched', E.toUnit(225, 'lb') === 225);
+ok('a weight typed in kg is stored as pounds', Math.round(E.fromUnit(100, 'kg')) === 220);
+ok('a round trip through kg loses nothing meaningful',
+   Math.abs(E.fromUnit(E.toUnit(185, 'kg'), 'kg') - 185) < 0.3);
+ok('the kg step is a 1.25 plate, the lb step is 2.5', E.unitStep('kg') === 1.25 && E.unitStep('lb') === 2.5);
+
+const noHist = E.suggestSet({ target: { load: 0, repLow: 8, repHigh: 12 }, lastEntry: null, level: 'inter' });
+ok('a finder set suggests nothing and says why', noHist.load === '' && /finder/i.test(noHist.why));
+const up = E.suggestSet({ target: { load: 110, repLow: 8, repHigh: 12 },
+  lastEntry: { sets: [{ load: 100, reps: 12 }] }, level: 'inter' });
+ok('after a load increase the rep target resets to the bottom of the range', up.reps === 8);
+const same = E.suggestSet({ target: { load: 100, repLow: 8, repHigh: 12 },
+  lastEntry: { sets: [{ load: 100, reps: 9 }] }, level: 'inter' });
+ok('at the same load it suggests one more rep than last time', same.reps === 10);
+const capped = E.suggestSet({ target: { load: 100, repLow: 8, repHigh: 12 },
+  lastEntry: { sets: [{ load: 100, reps: 12 }] }, level: 'inter' });
+ok('the rep suggestion never exceeds the top of the range', capped.reps === 12);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

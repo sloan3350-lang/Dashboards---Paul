@@ -222,14 +222,184 @@ const EX2 = [
     cue:'Curl the pelvis up rather than just swinging the legs.' }
 ];
 
+/* ============================================================
+   EX3 — free weights, and arms split out of the single "arms" slot.
+   Added after day one in the gym: the library was machine-heavy and had
+   six arm movements total, which is not enough to pick a curl you can
+   actually get a bench for on a busy evening.
+   ============================================================ */
+const SLOTS3 = [
+  { id: 'biceps', name: 'Biceps',            muscles: ['biceps', 'brachialis'] },
+  { id: 'triceps',name: 'Triceps',           muscles: ['triceps'] },
+  { id: 'unilat', name: 'Single leg / lunge',muscles: ['quads', 'glutes', 'hams'] }
+];
+
+const EX3 = [
+  // ---------------- BICEPS ----------------
+  { id:'bbcurl',      slot:'biceps', name:'Barbell curl',              inc:5,  equip:'bar',
+    joints:{elbow:1,wrist:1,shoulder:0}, cue:'Elbows pinned to the ribs. If the hips start swinging, the set is over.' },
+  { id:'ezcurlb',     slot:'biceps', name:'EZ-bar curl',               inc:5,  equip:'bar',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'The angled grip takes the wrist out of it. Same rule on the elbows.' },
+  { id:'dbcurl',      slot:'biceps', name:'Dumbbell curl',             inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Supinate as you come up, little finger turning toward the ceiling.' },
+  { id:'dbcurlseat',  slot:'biceps', name:'Seated dumbbell curl',      inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Sitting kills the leg drive, so the weight drops and the biceps work harder.' },
+  { id:'inclcurlb',   slot:'biceps', name:'Incline dumbbell curl',     inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:1}, cue:'Bench at about 45 degrees, arms hanging behind the torso. The stretch is the point.' },
+  { id:'spidercurl',  slot:'biceps', name:'Spider curl',               inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Chest on an incline bench, arms straight down. No body English is possible, which is why it works.' },
+  { id:'preachbb',    slot:'biceps', name:'Preacher curl (barbell)',   inc:5,  equip:'bar',
+    joints:{elbow:2,wrist:1,shoulder:0}, cue:'Do not slam into a locked elbow at the bottom. Stop just short.' },
+  { id:'preachmach',  slot:'biceps', name:'Preacher curl (machine)',   inc:5,  equip:'machine',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Line the elbow up with the pivot. The pad does the stabilising so you can push the set harder.' },
+  { id:'preachdb',    slot:'biceps', name:'One-arm DB preacher curl',  inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'One arm at a time finds the side that is lagging.' },
+  { id:'hammerb',     slot:'biceps', name:'Hammer curl',               inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Neutral grip. This is the brachialis and the forearm as much as the biceps.' },
+  { id:'crosshammer', slot:'biceps', name:'Cross-body hammer curl',    inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Across the chest toward the opposite shoulder.' },
+  { id:'concurl',     slot:'biceps', name:'Concentration curl',        inc:5,  equip:'db',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Elbow braced on the inner thigh. Slow on the way down.' },
+  { id:'cablecurl',   slot:'biceps', name:'Cable curl',                inc:5,  equip:'cable',
+    joints:{elbow:1,wrist:1,shoulder:0}, cue:'Tension never drops off at the top, unlike a barbell.' },
+  { id:'ropecurl',    slot:'biceps', name:'Rope cable curl',           inc:5,  equip:'cable',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Neutral grip, pull the ends apart at the top.' },
+  { id:'bayescurl',   slot:'biceps', name:'Bayesian cable curl',       inc:5,  equip:'cable',
+    joints:{elbow:1,wrist:0,shoulder:1}, cue:'Face away from a low pulley, arm behind you. Loads the stretched position.' },
+  { id:'revcurl',     slot:'biceps', name:'Reverse curl',              inc:5,  equip:'bar',
+    joints:{elbow:1,wrist:1,shoulder:0}, cue:'Overhand grip. Expect to use far less weight and do not force it.' },
+  { id:'dragcurl',    slot:'biceps', name:'Drag curl',                 inc:5,  equip:'bar',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Drag the bar up the torso, elbows travelling back rather than the bar arcing out.' },
+  { id:'zottman',     slot:'biceps', name:'Zottman curl',              inc:5,  equip:'db',
+    joints:{elbow:1,wrist:1,shoulder:0}, cue:'Up supinated, turn over at the top, down pronated.' },
+
+  // ---------------- TRICEPS ----------------
+  { id:'cgbench',     slot:'triceps',name:'Close-grip bench press',    inc:10, equip:'bar',
+    joints:{elbow:1,shoulder:1,wrist:1}, cue:'Hands about shoulder width, not narrower. Elbows tucked.' },
+  { id:'skullez',     slot:'triceps',name:'Skull crusher (EZ bar)',    inc:5,  equip:'bar',
+    joints:{elbow:2,shoulder:1,wrist:0}, cue:'Lower behind the forehead, not to it. Stop if the elbows complain.' },
+  { id:'jmpress',     slot:'triceps',name:'JM press',                  inc:5,  equip:'bar',
+    joints:{elbow:2,shoulder:1,wrist:1}, cue:'Half skull crusher, half close-grip press. Heavier than it looks.' },
+  { id:'ohdbext',     slot:'triceps',name:'Overhead DB extension',     inc:5,  equip:'db',
+    joints:{elbow:1,shoulder:1,wrist:0}, cue:'One heavy dumbbell in both hands. The overhead position is where the long head grows.' },
+  { id:'ohropeext',   slot:'triceps',name:'Overhead rope extension',   inc:5,  equip:'cable',
+    joints:{elbow:1,shoulder:1,wrist:0}, cue:'Step away from the stack so the cable pulls the elbows into a real stretch.' },
+  { id:'pushdownbar', slot:'triceps',name:'Cable pushdown (bar)',      inc:5,  equip:'cable',
+    joints:{elbow:1,wrist:1,shoulder:0}, cue:'Elbows at the sides. Lean in slightly, do not turn it into a press.' },
+  { id:'pushdownrope',slot:'triceps',name:'Rope pushdown',             inc:5,  equip:'cable',
+    joints:{elbow:1,wrist:0,shoulder:0}, cue:'Spread the rope at the bottom and hold for a beat.' },
+  { id:'dipparallel', slot:'triceps',name:'Parallel bar dip',          inc:5,  equip:'bw',
+    joints:{shoulder:2,elbow:1,wrist:1}, cue:'Stay upright to keep it on the triceps. Stop at the depth where the shoulder is still comfortable.' },
+  { id:'benchdip',    slot:'triceps',name:'Bench dip',                 inc:5,  equip:'bw',
+    joints:{shoulder:2,elbow:1,wrist:1}, cue:'Hard on the front of the shoulder. Skip it if that is a problem area.' },
+  { id:'machdip',     slot:'triceps',name:'Triceps extension machine', inc:5,  equip:'machine',
+    joints:{elbow:1,shoulder:0,wrist:0}, cue:'The lowest joint cost in this slot. Where to go when the elbows are sore.' },
+  { id:'kickback',    slot:'triceps',name:'Dumbbell kickback',         inc:5,  equip:'db',
+    joints:{elbow:1,shoulder:0,wrist:0}, cue:'Light weight, full lockout, squeeze. A finisher, not a main lift.' },
+
+  // ---------------- SINGLE LEG / LUNGE ----------------
+  { id:'walklunge',   slot:'unilat', name:'Walking lunge',             inc:5,  equip:'db',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Long stride for glutes, short for quads. Torso upright.' },
+  { id:'fwdlunge',    slot:'unilat', name:'Forward lunge',             inc:5,  equip:'db',
+    joints:{knee:2,hip:1,lowback:0}, cue:'Hardest on the knee of the lunge family. Control the landing.' },
+  { id:'revlungeu',   slot:'unilat', name:'Reverse lunge',             inc:5,  equip:'db',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Stepping back is kinder to the knee than stepping forward.' },
+  { id:'latlunge',    slot:'unilat', name:'Lateral lunge',             inc:5,  equip:'db',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Sit into the hip of the working side, trailing leg straight.' },
+  { id:'curtsy',      slot:'unilat', name:'Curtsy lunge',              inc:5,  equip:'db',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Step behind and across. Glute medius work, keep it light.' },
+  { id:'splitsq',     slot:'unilat', name:'Split squat',               inc:5,  equip:'db',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Both feet planted the whole set. Easier to load heavy than a walking lunge.' },
+  { id:'bulgu',       slot:'unilat', name:'Bulgarian split squat',     inc:5,  equip:'db',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Rear foot elevated. Front shin roughly vertical unless you want more knee.' },
+  { id:'stepupu',     slot:'unilat', name:'Step-up',                   inc:5,  equip:'db',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Drive through the top foot. Do not push off the floor with the trailing leg.' },
+  { id:'slsquat',     slot:'unilat', name:'Assisted pistol squat',     inc:5,  equip:'bw',
+    joints:{knee:2,hip:1,lowback:0}, cue:'Hold a strap or the rack. Depth only as far as the knee tolerates.' },
+  { id:'slrdl',       slot:'unilat', name:'Single-leg RDL',            inc:5,  equip:'db',
+    joints:{hip:1,lowback:1,knee:0}, cue:'Hips square. The reach comes from the hip, not the low back.' },
+  { id:'slpress',     slot:'unilat', name:'Single-leg press',          inc:10, equip:'machine',
+    joints:{knee:1,hip:1,lowback:0}, cue:'Foot centred on the platform. The lowest balance demand in this slot.' },
+
+  // ---------------- CALVES ----------------
+  { id:'legpresscalf',slot:'calves', name:'Leg press calf raise',      inc:10, equip:'machine',
+    joints:{knee:0,hip:0,lowback:0}, cue:'Balls of the feet on the bottom edge. Full stretch at the bottom, pause at the top.' },
+  { id:'smithcalf',   slot:'calves', name:'Smith machine calf raise',  inc:10, equip:'machine',
+    joints:{knee:0,hip:0,lowback:1}, cue:'Stand on a plate for range. Slow, no bouncing.' },
+  { id:'dbcalf',      slot:'calves', name:'Dumbbell calf raise',       inc:5,  equip:'db',
+    joints:{knee:0,hip:0,lowback:0}, cue:'One heavy dumbbell, free hand on the rack for balance.' },
+  { id:'slcalf',      slot:'calves', name:'Single-leg calf raise',     inc:5,  equip:'bw',
+    joints:{knee:0,hip:0,lowback:0}, cue:'Bodyweight is plenty to start. Full range beats extra load here.' },
+  { id:'donkeycalf',  slot:'calves', name:'Donkey calf raise',         inc:10, equip:'machine',
+    joints:{knee:0,hip:0,lowback:1}, cue:'Hips hinged forward puts the gastroc on more stretch.' },
+  { id:'tibraise',    slot:'calves', name:'Tibialis raise',            inc:5,  equip:'bw',
+    joints:{knee:0,hip:0,lowback:0}, cue:'The front of the shin. Balances out all the calf work and helps the knees.' },
+
+  // ---------------- CHEST, FREE WEIGHT ----------------
+  { id:'inclbb',      slot:'hpress', name:'Incline barbell bench',     inc:5,  equip:'bar',
+    joints:{shoulder:2,elbow:1,wrist:1}, cue:'Bench at 30 degrees, not 45. Higher than that turns it into a shoulder press.' },
+  { id:'dbfly',       slot:'hpress', name:'Dumbbell fly',              inc:5,  equip:'db',
+    joints:{shoulder:2,elbow:0,wrist:0}, cue:'Soft elbows, wide arc. Stop at chest level, not below.' },
+  { id:'cablecross',  slot:'hpress', name:'Cable crossover',           inc:5,  equip:'cable',
+    joints:{shoulder:1,elbow:0,wrist:0}, cue:'High pulleys, cross the hands at the bottom of each rep.' },
+  { id:'lowcablefly', slot:'hpress', name:'Low-to-high cable fly',     inc:5,  equip:'cable',
+    joints:{shoulder:1,elbow:0,wrist:0}, cue:'Upper chest. Finish with the hands near chin height.' },
+  { id:'floorpress',  slot:'hpress', name:'Floor press',               inc:5,  equip:'bar',
+    joints:{shoulder:1,elbow:1,wrist:1}, cue:'The floor stops the elbow before the shoulder gets stretched. Useful when the shoulder is cranky.' },
+
+  // ---------------- SHOULDERS, FREE WEIGHT ----------------
+  { id:'dbohp',       slot:'vpress', name:'Standing DB overhead press',inc:5,  equip:'db',
+    joints:{shoulder:2,elbow:1,lowback:1}, cue:'Squeeze the glutes so the low back does not take the press.' },
+  { id:'pushpress',   slot:'vpress', name:'Push press',                inc:5,  equip:'bar',
+    joints:{shoulder:2,elbow:1,lowback:1}, cue:'A short dip and drive from the legs. Lets you overload the top half.' },
+  { id:'rearfly',     slot:'vpress', name:'Bent-over rear delt fly',   inc:5,  equip:'db',
+    joints:{shoulder:1,elbow:0,wrist:0}, cue:'Thumbs down, lead with the elbows. Very light weight.' },
+  { id:'leanlat',     slot:'vpress', name:'Leaning cable lateral',     inc:5,  equip:'cable',
+    joints:{shoulder:1,elbow:0,wrist:0}, cue:'Lean away from the stack. Loads the delt at the bottom where a dumbbell does not.' },
+  { id:'plateraise',  slot:'vpress', name:'Front plate raise',         inc:5,  equip:'db',
+    joints:{shoulder:1,elbow:0,wrist:1}, cue:'To eye level, no higher. Most people already get enough front delt from pressing.' },
+
+  // ---------------- BACK, FREE WEIGHT ----------------
+  { id:'bbrow',       slot:'hpull',  name:'Bent-over barbell row',     inc:10, equip:'bar',
+    joints:{lowback:2,shoulder:1,elbow:1}, cue:'Hinge to about 45 degrees and hold it. The low back pays for this one.' },
+  { id:'sealrow',     slot:'hpull',  name:'Seal row',                  inc:10, equip:'bar',
+    joints:{lowback:0,shoulder:1,elbow:1}, cue:'Chest on a raised bench. All the barbell row, none of the low back.' },
+  { id:'meadows',     slot:'hpull',  name:'Meadows row',               inc:10, equip:'bar',
+    joints:{lowback:1,shoulder:1,elbow:1}, cue:'Landmine, staggered stance, one arm. Big stretch on the lat.' },
+  { id:'krocrow',     slot:'hpull',  name:'Kroc row',                  inc:5,  equip:'db',
+    joints:{lowback:1,shoulder:1,elbow:1}, cue:'Heavy one-arm row, high reps, a little body English allowed.' },
+
+  // ---------------- LEGS, FREE WEIGHT ----------------
+  { id:'backsq',      slot:'squat',  name:'Back squat',                inc:10, equip:'rack',
+    joints:{knee:2,lowback:2,hip:1}, cue:'Brace before you unrack. Depth that keeps the pelvis neutral, not depth for its own sake.' },
+  { id:'dbsquat',     slot:'squat',  name:'Dumbbell squat',            inc:5,  equip:'db',
+    joints:{knee:1,lowback:1,hip:1}, cue:'Dumbbells at the sides. Easy to bail out of, which makes it a good heavy-day substitute.' },
+  { id:'dbrdl',       slot:'hinge',  name:'Dumbbell RDL',              inc:5,  equip:'db',
+    joints:{lowback:1,hip:1,knee:0}, cue:'Push the hips back, dumbbells tracking down the thighs. Stop where the hamstring stops, not where the back rounds.' },
+  { id:'sumodl',      slot:'hinge',  name:'Sumo deadlift',             inc:10, equip:'bar',
+    joints:{lowback:2,hip:2,knee:1}, cue:'Wide stance, upright torso. Easier on the low back than conventional for most people.' },
+  { id:'stifflegdl',  slot:'hinge',  name:'Stiff-leg deadlift',        inc:10, equip:'bar',
+    joints:{lowback:2,hip:1,knee:0}, cue:'Minimal knee bend. The most low-back cost of the hinge family, so earn it first.' },
+
+  // ---------------- CORE ----------------
+  { id:'plank',       slot:'core',   name:'Weighted plank',            inc:5,  equip:'bw',
+    joints:{lowback:0,shoulder:1,hip:0}, cue:'Ribs down, glutes on. Time under tension, not a personal best in minutes.' },
+  { id:'paloff',      slot:'core',   name:'Pallof press',              inc:5,  equip:'cable',
+    joints:{lowback:0,shoulder:1,hip:0}, cue:'Resist the rotation. Nothing should move but the arms.' },
+  { id:'deadbug',     slot:'core',   name:'Dead bug',                  inc:5,  equip:'bw',
+    joints:{lowback:0,shoulder:0,hip:0}, cue:'Low back flat on the floor the whole time. Slow beats many.' },
+  { id:'sideplank',   slot:'core',   name:'Side plank',                inc:5,  equip:'bw',
+    joints:{lowback:0,shoulder:1,hip:0}, cue:'Stack the shoulders and hips. Obliques.' }
+];
+
 const SLOTS2 = [
   { id: 'arms',   name: 'Arms',        muscles: ['biceps', 'triceps'] },
   { id: 'calves', name: 'Calves',      muscles: ['calves'] },
   { id: 'core',   name: 'Core',        muscles: ['abs', 'obliques'] }
 ];
 
-SLOTS2.forEach(s2 => { if (!SLOTS.find(x => x.id === s2.id)) SLOTS.push(s2); });
-EX2.forEach(e => { if (!EX.find(x => x.id === e.id)) { e.video = VID(e.name); EX.push(e); } });
+SLOTS2.concat(SLOTS3).forEach(s2 => { if (!SLOTS.find(x => x.id === s2.id)) SLOTS.push(s2); });
+EX2.concat(EX3).forEach(e => { if (!EX.find(x => x.id === e.id)) { e.video = VID(e.name); EX.push(e); } });
 
 // default equipment for the originals, and fold the new lifts into substitution
 EX.forEach(e => { if (!e.equip) e.equip = /machine|press|pulldown|curl|deck|extension/i.test(e.name) ? 'machine' : 'db'; });
@@ -238,7 +408,7 @@ Object.keys(SUBS).forEach(slot => {
     .sort((a, b) => jointCost(a) - jointCost(b))
     .forEach(e => SUBS[slot].push(e.id));
 });
-['arms','calves','core'].forEach(slot => {
+['arms','calves','core','biceps','triceps','unilat'].forEach(slot => {
   SUBS[slot] = EX.filter(e => e.slot === slot).sort((a, b) => jointCost(a) - jointCost(b)).map(e => e.id);
 });
 function jointCost(e) {

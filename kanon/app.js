@@ -1,6 +1,9 @@
 /* KANON app shell. State in localStorage, exported as JSON from Settings. */
 'use strict';
 const K = 'kanon.v1';
+const KBAK = 'kanon.v1.bak';       // last known-good copy, one save behind
+const KBAD = 'kanon.v1.corrupt';   // whatever could not be parsed, kept, never overwritten blindly
+let recovered = '';                // set by load() when it had to fall back
 const today = () => new Date().toISOString().slice(0, 10);
 const el = (t, c, txt) => { const n = document.createElement(t); if (c) n.className = c; if (txt != null) n.textContent = txt; return n; };
 const $ = s => document.querySelector(s);
@@ -14,7 +17,8 @@ function seed() {
                                          load: null, misses: 0, primary: !!primary });
   return {
     profile: { sex:'male', age:44, heightIn:70, goal:'cut', appetiteSuppressed:true, theme:'dark', figure:'male',
-               startWeight:219, targetWeight:207, trainDays:'Tue / Sat' },
+               startWeight:219, targetWeight:207, trainDays:'Tue / Sat',
+               level:'inter', unit:'lb', programId:'fullclassic', onboarded:false },
     week: 1,
     cur: 0,
     days: [
@@ -36,32 +40,81 @@ function seed() {
 }
 let S = load();
 function load() {
-  try {
-    const r = localStorage.getItem(K);
-    if (r) {
-      const st = Object.assign(seed(), JSON.parse(r));
-      // plans saved before `primary` existed: the first three slots carried it
-      // plans saved as a fixed A/B pair become a list of days
-      if (st.plan && !Array.isArray(st.days)) {
-        st.days = [{ name: 'Full body A', slots: st.plan.A || [] },
-                   { name: 'Full body B', slots: st.plan.B || [] }];
-        st.cur = st.next === 'B' ? 1 : 0;
+  const raw = safeGet(K);
+  if (raw) {
+    try { return parseState(raw); }
+    catch (e) {
+      console.warn('main state unreadable', e);
+      try { localStorage.setItem(KBAD, raw); } catch (e2) {}
+      const bak = safeGet(KBAK);
+      if (bak) {
+        try {
+          const st = parseState(bak);
+          recovered = 'The main save was unreadable, so the last good copy was restored. You may have lost the most recent session.';
+          return st;
+        } catch (e3) { console.warn('backup unreadable too', e3); }
       }
-      delete st.plan; delete st.next;
-      (st.days || []).forEach(d => (d.slots || []).forEach((p, i) => {
-        if (p.primary === undefined) p.primary = i < 3;
-      }));
-      if (typeof st.cur !== 'number' || !st.days[st.cur]) st.cur = 0;
-      // Browsing ahead is a look, not a place. A reload always lands back on
-      // the live session, so nobody reopens the app into a read-only screen.
-      st.preview = null;
-      return st;
+      recovered = 'The saved data could not be read and there was no usable backup, so the app started fresh. The unreadable copy was kept in case it can be salvaged.';
+      return seed();
     }
   }
-  catch (e) { console.warn('state unreadable, starting fresh', e); }
+  const bak = safeGet(KBAK);
+  if (bak) {
+    try {
+      const st = parseState(bak);
+      recovered = 'The main save had gone missing, which usually means the browser cleared it. The last good copy was restored.';
+      return st;
+    } catch (e) {}
+  }
   return seed();
 }
-function save() { try { localStorage.setItem(K, JSON.stringify(S)); } catch (e) { alert('Could not save locally. Export your data from Settings.'); } }
+function safeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+/* Every write keeps the previous good copy. A session logged on the gym floor is
+ * not something to lose to a bad parse or a half-finished write, so load() falls
+ * back to the backup rather than quietly handing back an empty app. */
+function save() {
+  try {
+    const cur = localStorage.getItem(K);
+    const next = JSON.stringify(S);
+    if (cur && cur !== next) { try { localStorage.setItem(KBAK, cur); } catch (e) {} }
+    localStorage.setItem(K, next);
+  } catch (e) {
+    alert('Could not save on this device. Export your data from Settings before you close the app.');
+  }
+}
+
+function parseState(raw) {
+  const st = Object.assign(seed(), JSON.parse(raw));
+  // plans saved before `primary` existed: the first three slots carried it
+  // plans saved as a fixed A/B pair become a list of days
+  if (st.plan && !Array.isArray(st.days)) {
+    st.days = [{ name: 'Full body A', slots: st.plan.A || [] },
+               { name: 'Full body B', slots: st.plan.B || [] }];
+    st.cur = st.next === 'B' ? 1 : 0;
+  }
+  delete st.plan; delete st.next;
+  (st.days || []).forEach(d => (d.slots || []).forEach((p, i) => {
+    if (p.primary === undefined) p.primary = i < 3;
+  }));
+  if (typeof st.cur !== 'number' || !st.days[st.cur]) st.cur = 0;
+  if (!st.profile.level) st.profile.level = 'inter';
+  if (!st.profile.unit) st.profile.unit = 'lb';
+  if (st.profile.onboarded === undefined) st.profile.onboarded = st.sessions && st.sessions.length > 0;
+  // Browsing ahead is a look, not a place. A reload always lands back on
+  // the live session, so nobody reopens the app into a read-only screen.
+  st.preview = null;
+  return st;
+}
+
+/* ---------------- units ----------------
+ * Everything is stored in pounds. The unit setting only changes what is shown
+ * and what a typed number means, so switching back and forth never rounds your
+ * history away. */
+const U = () => S.profile.unit || 'lb';
+const disp = lb => toUnit(lb, U());                    // stored -> shown
+const stored = v => fromUnit(v, U());                  // typed  -> stored
+const uLabel = () => U();
+const showLoad = lb => (lb === '' || lb == null) ? '' : disp(lb) + ' ' + uLabel();
 
 /* ---------------- week rules (the ramp already locked in your program) ---------------- */
 function setsForWeek(week, isPrimary) {
@@ -126,6 +179,15 @@ document.querySelectorAll('.tab').forEach(t =>
 
 /* =================== TRAIN =================== */
 views.train = root => {
+  // If load() had to fall back to the backup, say so once rather than letting a
+  // missing session look like the app quietly ate it.
+  if (recovered) {
+    const rec = el('div','alert warn');
+    rec.innerHTML = '<b>Your data was restored from backup</b>' + esc(recovered) +
+      ' Export a copy from Settings now so there is one outside this browser.';
+    root.append(rec);
+    recovered = '';
+  }
   const pv = S.preview;
   const dayIdx = pv ? pv.day : S.cur;
   const week = pv ? pv.week : S.week;
@@ -231,7 +293,15 @@ views.train = root => {
   root.append(list);
   makeReorderable(list, plan);
 
+  // Add a body group to this session. Calves, arms and single-leg work are the
+  // usual reasons; the picker covers every slot in the library.
+  const add = el('button','btn sm block ghost','+ Add a lift to this session');
+  add.style.marginTop = '2px';
+  add.onclick = () => openAddSlot(dayIdx);
+  root.append(add);
+
   const fin = el('button','btn primary block','Finish session');
+  fin.style.marginTop = '12px';
   fin.onclick = finishSession;
   root.append(fin);
 
@@ -255,13 +325,15 @@ const dayName = i => (S.days[i] && S.days[i].name) || 'Session';
 
 function draftFor(p) {
   return S.draft.entries[p.slot] ||
-    (S.draft.entries[p.slot] = { exId: p.exId, slot: p.slot, sets: [], pump: 0, readiness: 0, joint: null, done: false });
+    (S.draft.entries[p.slot] = { exId: p.exId, slot: p.slot, sets: [], setsPlanned: null,
+                                 pump: 0, readiness: 0, joint: null, done: false });
 }
 
 function liftRow(p, idx, week, preview) {
   const ex = byId(p.exId);
   const d = preview ? null : draftFor(p);
-  const nSets = Math.max(p.sets, setsForWeek(week, p.primary));
+  const planned = Math.max(p.sets, setsForWeek(week, p.primary));
+  const nSets = d && d.setsPlanned != null ? d.setsPlanned : planned;
   const logged = d ? d.sets.filter(x => x.reps).length : 0;
 
   const row = el('div','lift' + (d && d.done ? ' done' : '') + (preview ? ' preview' : ''));
@@ -285,8 +357,24 @@ function liftRow(p, idx, week, preview) {
   const body = el('span','lift-b');
   body.append(el('span','ex-slot', SLOTS.find(s => s.id === p.slot).name));
   body.append(el('span','lift-n', ex.name));
-  body.append(el('span','lift-t', (p.load ? p.load + ' lb' : 'Finder set') +
+  body.append(el('span','lift-t', (p.load ? showLoad(p.load) : 'Finder set') +
     ' \u00b7 ' + p.repLow + '\u2013' + p.repHigh + ' reps \u00b7 ' + nSets + ' set' + (nSets > 1 ? 's' : '')));
+
+  // What you actually logged stays on the row. The three feedback answers
+  // collapse to one short line here rather than sitting open taking a screen.
+  if (d && logged) {
+    const done = d.sets.filter(x => x.reps);
+    body.append(el('span','setline',
+      done.map(x => disp(x.load) + '\u00d7' + x.reps).join('  \u00b7  ') +
+      (done.length && done[done.length - 1].rir !== '' ? '   ' + done[done.length - 1].rir + ' in tank' : '')));
+    const bits = [];
+    if (d.pump) bits.push('Intensity ' + ['', 'barely', 'moderate', 'strong', 'too much'][d.pump]);
+    if (d.readiness) bits.push(['', 'fresh', 'slightly sore', 'still sore', 'too sore'][d.readiness]);
+    bits.push(d.joint && d.joint.sev
+      ? (JOINT_LEVELS[d.joint.sev] || {}).label.toLowerCase() + ' ' + jointName(d.joint.joint || '')
+      : 'no pain');
+    body.append(el('span','fbline', bits.join(' \u00b7 ') + ' \u00b7 tap to edit'));
+  }
   row.append(body);
   row.append(el('span','spacer'));
   if (!preview) {
@@ -402,15 +490,15 @@ function openLift(p, idx) {
     inner.append(head);
 
     const dots = el('div','steps');
-    ['Sets','Muscle','Recovery','Joints'].forEach((label, i) => {
+    ['Sets','Intensity','Recovery','Joints'].forEach((label, i) => {
       const dd = el('span','step' + (i === step ? ' on' : i < step ? ' past' : ''), label);
       dots.append(dd);
     });
     inner.append(dots);
 
     if (step === 0) drawSets(ex, nSets, rir);
-    if (step === 1) drawQ('How much did the muscle do?',
-      'Barely means the joints took over. Too much means it cramped or gave out before the reps did.',
+    if (step === 1) drawQ('Intensity',
+      'How hard the target muscle actually worked. Barely means the joints took over. Too much means it cramped or gave out before the reps did.',
       [[1,'Barely'],[2,'Moderate'],[3,'Strong'],[4,'Too much']],
       d.pump, v => { d.pump = v; save(); step = 2; drawStep(); });
     if (step === 2) drawQ('How recovered were you coming in?',
@@ -423,7 +511,7 @@ function openLift(p, idx) {
   function drawSets(ex, nSets, rir) {
     const t = el('div','target');
     t.innerHTML = p.load
-      ? `Target <b>${p.load} lb</b> &middot; ${p.repLow}\u2013${p.repHigh} reps &middot; leave <b>${rir}</b> in the tank`
+      ? `Target <b>${showLoad(p.load)}</b> &middot; ${p.repLow}\u2013${p.repHigh} reps &middot; leave <b>${rir}</b> in the tank`
       : `<b>Finder set.</b> Pick a weight you could get about ${p.repHigh + 3} reps with and stop at ${p.repHigh}. The engine takes over from the next session.`;
     inner.append(t);
     const L = lastFor(p.slot, p.exId);
@@ -454,44 +542,64 @@ function openLift(p, idx) {
     inner.append(hdr);
     // Planned rows come from the programme; anything past that is one you added
     // by hand this session and can drop again.
-    const shown = Math.max(nSets, d.sets.length);
+    // What the engine would put in the boxes if you did nothing: the load it
+    // decided on last time, and the rep target that goes with it. Typed over
+    // freely — these are a starting point, not a lock.
+    const sug = suggestSet({ target: p, lastEntry: L, level: S.profile.level });
+    // How many rows this session wants. Starts at what the programme planned and
+    // moves as you add or drop rows, so dropping a planned set actually removes
+    // it instead of the row reappearing on the next redraw.
+    if (d.setsPlanned == null) d.setsPlanned = nSets;
+    const shown = Math.max(d.setsPlanned, d.sets.length);
     for (let i = 0; i < shown; i++) {
-      if (!d.sets[i]) d.sets[i] = { load: lastLoggedLoad(d, p), reps: '', rir: '' };
+      if (!d.sets[i]) d.sets[i] = { load: lastLoggedLoad(d, p) || sug.load, reps: '', rir: '' };
       const r = el('div','setrow');
       r.append(el('div','n', String(i + 1)));
       ['load','reps','rir'].forEach(f => {
         const inp = el('input'); inp.type = 'number'; inp.inputMode = 'decimal';
-        inp.min = '0'; inp.value = d.sets[i][f];
+        inp.min = '0'; inp.step = f === 'load' ? String(unitStep(U())) : '1';
+        inp.value = f === 'load' ? disp(d.sets[i][f]) : d.sets[i][f];
         inp.id = 'set-' + p.slot + '-' + i + '-' + f;
-        inp.placeholder = f === 'load' ? 'lb' : f === 'reps' ? '#' : 'RIR';
+        inp.placeholder = f === 'load' ? uLabel()
+                        : f === 'reps' ? (sug.reps || '#')
+                        : String(rir);
         inp.setAttribute('aria-label', 'Set ' + (i + 1) + ' ' + (f === 'load' ? 'weight' : f === 'reps' ? 'reps' : 'reps left in the tank'));
-        inp.oninput = () => { d.sets[i][f] = inp.value === '' ? '' : Number(inp.value); save(); next.disabled = !anyReps(); };
+        inp.oninput = () => {
+          d.sets[i][f] = inp.value === '' ? '' : (f === 'load' ? stored(inp.value) : Number(inp.value));
+          save(); next.disabled = !anyReps();
+        };
         r.append(inp);
       });
-      if (i >= nSets) {
-        const rm = el('button','setdrop', '\u00d7');
-        rm.type = 'button';
-        rm.title = 'Remove set ' + (i + 1);
-        rm.setAttribute('aria-label', rm.title);
-        rm.onclick = () => { d.sets.splice(i, 1); save(); drawStep(); };
-        r.append(rm);
-      } else {
-        r.append(el('div',null,''));
-      }
+      // Any set can go, planned or added. A set you did not do should not sit
+      // there as an empty row skewing what the engine reads.
+      const rm = el('button','setdrop', '\u00d7');
+      rm.type = 'button';
+      rm.title = 'Remove set ' + (i + 1);
+      rm.setAttribute('aria-label', rm.title);
+      rm.onclick = () => {
+        d.sets.splice(i, 1);
+        d.setsPlanned = Math.max(0, Math.min(d.setsPlanned, shown) - 1);
+        save(); drawStep();
+      };
+      r.append(rm);
       inner.append(r);
     }
+    if (!shown) inner.append(Object.assign(el('p','tiny'), { textContent:
+      'No sets left on this lift. Add one back, or leave it and the lift is simply skipped this session.' }));
+    if (sug.why) inner.append(Object.assign(el('p','tiny sugwhy'), { textContent: sug.why }));
 
     const addBtn = el('button','btn sm block ghost','+ Add set');
     addBtn.style.marginTop = '2px';
     addBtn.onclick = () => {
-      d.sets.push({ load: lastLoggedLoad(d, p), reps: '', rir: '' });
+      d.sets.push({ load: lastLoggedLoad(d, p) || sug.load, reps: '', rir: '' });
+      d.setsPlanned = Math.max(d.setsPlanned, d.sets.length);
       save(); drawStep();
     };
     inner.append(addBtn);
     inner.append(Object.assign(el('p','tiny'), { textContent:
       shown > nSets
         ? 'Extra sets count toward this session and the engine reads them, but they do not change the planned volume. That still moves only when a lift stalls.'
-        : 'The programme calls for ' + nSets + (nSets === 1 ? ' set' : ' sets') + ' here. Add more if you want them.' }));
+        : 'The programme calls for ' + nSets + (nSets === 1 ? ' set' : ' sets') + ' here. Add or drop rows as the session actually goes.' }));
 
     const next = el('button','btn primary block','Next');
     next.style.marginTop = '14px';
@@ -527,8 +635,8 @@ function openLift(p, idx) {
   function drawJoint(ex) {
     inner.append(el('div','q','Any joint pain?'));
     inner.append(Object.assign(el('div','qs'), { textContent:
-      'Muscle burn is fine. Joints are not. Two means we swap it now, not later.' }));
-    const sev = optGroup([[0,'None'],[1,'Mild'],[2,'Sharp']],
+      'Muscle burn is fine, joints are not. Each level does something different: mild is noted, mild twice running offers a swap, moderate offers one now, sharp stops the lift.' }));
+    const sev = optGroup(JOINT_LEVELS.map(j => [j.sev, j.label]),
       d.joint ? d.joint.sev : 0, v => {
         d.joint = v === 0 ? null : { sev: v, joint: (d.joint && d.joint.joint) || null };
         save(); drawStep();
@@ -547,13 +655,38 @@ function openLift(p, idx) {
         grid.append(o);
       });
       inner.append(grid);
-      if (d.joint.sev >= 2 && d.joint.joint) {
-        const sub = substitute(p.exId, d.joint.joint, Object.keys(S.quarantine), EX, SUBS);
-        const a = el('div','alert bad');
-        a.innerHTML = sub
-          ? `<b>Swapping this lift</b>${esc(ex.name)} is out for the next 3 sessions. Same slot, less ${esc(jointName(d.joint.joint))}: <b>${esc(sub.name)}</b>. It comes back for a retest after that.`
-          : `<b>Nothing left to swap to in this slot</b>Drop this slot for now. If it still hurts in a week, get it looked at.`;
+
+      if (d.joint.joint) {
+        const run = mildRun(S.sessions, p.slot, d.joint.joint);
+        const act = jointAction(d.joint.sev, d.joint.joint, run);
+        const sub = act.action === 'none' || act.action === 'note' ? null
+          : substitute(p.exId, d.joint.joint, Object.keys(S.quarantine), EX, SUBS);
+        const cls = act.action === 'stop' ? 'alert bad'
+                  : act.action === 'swap' ? 'alert warn' : 'alert good';
+        const a = el(act.action === 'note' ? 'div' : 'div', cls);
+        let html = '<b>' + esc(act.title) + '</b>' + esc(act.body);
+        if (act.action === 'swap' || act.action === 'stop') {
+          html += sub
+            ? '<br><br>Same slot, less ' + esc(jointName(d.joint.joint)) + ': <b>' + esc(sub.name) + '</b>.'
+            : '<br><br>Nothing left in this slot loads that joint less. Drop the slot for now.';
+        }
+        a.innerHTML = html;
         inner.append(a);
+
+        // Moderate offers the swap and lets you decline it. Sharp takes it.
+        if (act.action === 'swap' && sub) {
+          const take = el('button','btn sm block','Swap to ' + sub.name);
+          take.onclick = () => { d.joint.accept = true; save(); drawStep(); };
+          const keep = el('button','btn sm block ghost','Keep ' + ex.name + ' for now');
+          keep.onclick = () => { d.joint.accept = false; save(); drawStep(); };
+          take.style.marginBottom = '6px';
+          if (d.joint.accept === undefined) { inner.append(take); inner.append(keep); }
+          else {
+            inner.append(Object.assign(el('p','tiny'), { textContent: d.joint.accept
+              ? 'Swapping to ' + sub.name + ' when you finish the session.'
+              : 'Keeping ' + ex.name + '. The app will ask again if it happens next session.' }));
+          }
+        }
       }
     }
 
@@ -671,15 +804,7 @@ function openSwap(p, onDone) {
   cb.onclick = () => {
     const name = ci.value.trim();
     if (!name) { ci.focus(); return; }
-    const id = 'c_' + name.toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,28) + '_' + Date.now().toString(36).slice(-4);
-    const custom = { id, slot: p.slot, name, inc: 5, custom: true,
-                     joints: { shoulder:1, elbow:1, wrist:1, lowback:1, hip:1, knee:1 },
-                     cue: 'Your lift. Same rules: control the weight, stop the set at the target reps left in the tank.',
-                     video: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' proper form') };
-    S.custom = S.custom || [];
-    S.custom.push(custom);
-    registerCustom();
-    applySwap(p, id, onDone);
+    applySwap(p, addCustomEx(name, p.slot).id, onDone);
   };
   ci.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); cb.click(); } };
   crow.append(cb);
@@ -693,6 +818,20 @@ function openSwap(p, onDone) {
   document.body.style.overflow = 'hidden';
   document.addEventListener('keydown', onSheetKey);
   x.focus();
+}
+
+// One place that mints a custom lift, used by both the swap sheet and the
+// add-a-lift picker.
+function addCustomEx(name, slot) {
+  const id = 'c_' + name.toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,28) + '_' + Date.now().toString(36).slice(-4);
+  const custom = { id, slot, name, inc: 5, custom: true, equip: 'custom',
+                   joints: { shoulder:1, elbow:1, wrist:1, lowback:1, hip:1, knee:1 },
+                   cue: 'Your lift. Same rules: control the weight, stop the set at the target reps left in the tank.',
+                   video: 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' proper form') };
+  S.custom = S.custom || [];
+  S.custom.push(custom);
+  registerCustom();
+  return custom;
 }
 
 // Custom lifts live in state and are merged back into the library on every boot.
@@ -719,8 +858,15 @@ function finishSession() {
     const usedLoad = sets.length ? sets[0].load : (p.load || 0);
     const target = { repLow: p.repLow, repHigh: p.repHigh, rir: rirForWeek(S.week), load: p.load || usedLoad };
 
-    // joint first: it overrides everything
-    if (d.joint && d.joint.sev >= 2) {
+    // Joint first, because it overrides everything the load engine would say.
+    // Sharp is not negotiable. Moderate, and mild for the second session running,
+    // are offered and can be declined; declining is recorded, not ignored.
+    const jAct = d.joint && d.joint.joint
+      ? jointAction(d.joint.sev, d.joint.joint, mildRun(S.sessions, p.slot, d.joint.joint))
+      : { action: 'none' };
+    const pulling = jAct.action === 'stop' || (jAct.action === 'swap' && d.joint.accept === true);
+
+    if (pulling) {
       const sub = substitute(p.exId, d.joint.joint, Object.keys(S.quarantine), EX, SUBS);
       S.quarantine[p.exId] = 3;
       if (sub) {
@@ -729,8 +875,15 @@ function finishSession() {
       } else {
         changes.push(`${ex.name} pulled. No substitute left in that slot, so it is dropped for now.`);
       }
-    } else if (sets.length) {
-      const r = nextLoad(sets, target, ex, p.misses || 0);
+      entries.push({ exId: ex.id, slot: p.slot, sets, pump: d.pump, readiness: d.readiness,
+                     joint: d.joint, loadProgressed: false, perfDown: false });
+      return;
+    }
+    if (jAct.action === 'swap') {
+      changes.push(`${ex.name}: ${jAct.title.toLowerCase()}, swap declined. Asked again next session.`);
+    }
+    if (sets.length) {
+      const r = nextLoad(sets, target, ex, p.misses || 0, S.profile.level);
       const progressed = r.load > (p.load || 0);
       p.load = r.load; p.misses = r.misses;
       const vd = volumeDecision(
@@ -779,18 +932,319 @@ function slotHistory(slot) {
 
 /* ---- new mesocycle wizard ---- */
 const SLOT_MUSCLE = { squat:'Quads', hpress:'Chest', vpull:'Lats', hinge:'Hams & glutes',
-                      hpull:'Mid-back', vpress:'Delts', arms:'Arms', calves:'Calves', core:'Core' };
+                      hpull:'Mid-back', vpress:'Delts', arms:'Arms', calves:'Calves', core:'Core',
+                      biceps:'Biceps', triceps:'Triceps', unilat:'Single leg' };
 
-function openMesoWizard() {
+function openMesoWizard(opts) {
   closeSheet();
-  let days = (S.setup && S.setup.days) || 2;
+  const onboarding = !!(opts && opts.onboarding);
+  let step = onboarding ? 0 : 1;
+  let days = (S.setup && S.setup.days) || 3;
   let minutes = (S.setup && S.setup.minutes) || 50;
+  let level = S.profile.level || 'inter';
+  let goal = S.profile.goal || 'gain';
+  let programId = S.profile.programId || 'fullclassic';
   let draft = null;
 
   sheetEl = el('div','sheet');
   sheetEl.setAttribute('role','dialog');
   sheetEl.setAttribute('aria-modal','true');
-  sheetEl.setAttribute('aria-label','Build a new mesocycle');
+  sheetEl.setAttribute('aria-label', onboarding ? 'Set up Kanon' : 'Build a new mesocycle');
+  if (!onboarding) sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
+  const inner = el('div','sheet-inner');
+  sheetEl.append(inner);
+  document.body.append(sheetEl);
+  document.body.style.overflow = 'hidden';
+  if (!onboarding) document.addEventListener('keydown', onSheetKey);
+  draw();
+
+  function matches() {
+    const m = programsFor({ level, days, minutes });
+    return m.length ? m : PROGRAMS.filter(p => p.levels.includes(level));
+  }
+
+  function header(kicker, title) {
+    const head = el('div','sheet-h');
+    const t = el('div');
+    t.append(el('div','ex-slot', kicker));
+    t.append(Object.assign(el('h2'), { textContent: title }));
+    head.append(t); head.append(el('div','spacer'));
+    if (!onboarding) {
+      const x = el('button','btn sm ghost','Close');
+      x.onclick = () => { closeSheet(); render(); };
+      head.append(x);
+    }
+    inner.append(head);
+    const rail = el('div','steps');
+    (onboarding ? ['You','Schedule','Programme','Review'] : ['Schedule','Programme','Review'])
+      .forEach((label, i) => {
+        const idx = onboarding ? i : i + 1;
+        rail.append(el('span','step' + (idx === step ? ' on' : idx < step ? ' past' : ''), label));
+      });
+    inner.append(rail);
+  }
+
+  function nav(backTo, nextTo, nextLabel, guard) {
+    const row = el('div','row');
+    row.style.marginTop = '16px';
+    if (backTo !== null) {
+      const b = el('button','btn ghost','Back');
+      b.onclick = () => { step = backTo; draw(); };
+      row.append(b);
+    }
+    const n = el('button','btn primary','' + nextLabel);
+    n.style.flex = '1';
+    if (guard && !guard()) n.disabled = true;
+    n.onclick = () => { step = nextTo; draw(); };
+    row.append(n);
+    inner.append(row);
+  }
+
+  function numField(label, value, onChange, suffix) {
+    const wrap = el('div');
+    wrap.style.flex = '1 1 90px';
+    wrap.append(el('div','lbl', label));
+    const i = el('input'); i.type = 'number'; i.inputMode = 'decimal'; i.min = '0';
+    i.value = value == null ? '' : value;
+    i.oninput = () => onChange(i.value);
+    wrap.append(i);
+    if (suffix) wrap.append(el('div','lbl', suffix));
+    return wrap;
+  }
+
+  function draw() {
+    draft = buildProgram({ programId, days, minutes, level, goal }, EX, SUBS);
+    inner.innerHTML = '';
+    if (step === 0) drawYou();
+    if (step === 1) drawSchedule();
+    if (step === 2) drawPrograms();
+    if (step === 3) drawReview();
+    inner.scrollTop = 0;
+  }
+
+  /* ---- step 0: who is lifting ---- */
+  function drawYou() {
+    header('First run', 'About you');
+    inner.append(Object.assign(el('p','hint'), { textContent:
+      'Six answers. They set the starting loads, the protein target, the body-fat estimate and which programmes get offered. All of it is editable later in Settings and none of it leaves this device.' }));
+
+    inner.append(el('div','eyebrow','Header figure'));
+    const figs = el('div','opts triple');
+    [['male','Male'],['female','Female'],['none','None']].forEach(([v, lab]) => {
+      const b = el('button','opt', lab); b.type = 'button';
+      b.setAttribute('aria-pressed', String((S.profile.figure || 'male') === v));
+      b.onclick = () => { S.profile.figure = v; save(); draw(); };
+      figs.append(b);
+    });
+    inner.append(figs);
+
+    inner.append(el('div','eyebrow','Sex, for the body-fat and protein maths'));
+    const sx = el('div','opts triple');
+    [['male','Male'],['female','Female']].forEach(([v, lab]) => {
+      const b = el('button','opt', lab); b.type = 'button';
+      b.setAttribute('aria-pressed', String(S.profile.sex === v));
+      b.onclick = () => { S.profile.sex = v; save(); draw(); };
+      sx.append(b);
+    });
+    inner.append(sx);
+
+    inner.append(el('div','eyebrow','Age, height and weight'));
+    const row = el('div','row wrap');
+    row.append(numField('Age', S.profile.age, v => { S.profile.age = Number(v) || ''; save(); }));
+    const ft = Math.floor((Number(S.profile.heightIn) || 0) / 12) || '';
+    const inch = round1((Number(S.profile.heightIn) || 0) - (ft || 0) * 12) || '';
+    let f = ft, n2 = inch;
+    const setH = () => { S.profile.heightIn = round1((Number(f) || 0) * 12 + (Number(n2) || 0)); save(); };
+    row.append(numField('Feet', ft, v => { f = v; setH(); }));
+    row.append(numField('Inches', inch, v => { n2 = v; setH(); }));
+    row.append(numField('Weight', S.profile.startWeight ? disp(S.profile.startWeight) : '',
+      v => { S.profile.startWeight = stored(v); save(); }, uLabel()));
+    inner.append(row);
+
+    inner.append(el('div','eyebrow','Units'));
+    const un = el('div','opts triple');
+    [['lb','Pounds'],['kg','Kilograms']].forEach(([v, lab]) => {
+      const b = el('button','opt', lab); b.type = 'button';
+      b.setAttribute('aria-pressed', String(U() === v));
+      b.onclick = () => { S.profile.unit = v; save(); draw(); };
+      un.append(b);
+    });
+    inner.append(un);
+
+    inner.append(el('div','eyebrow','Lifting experience'));
+    inner.append(Object.assign(el('div','qs'), { textContent:
+      'This is the single answer that changes the programme most. It sets how much volume you start with and how hard a load increase is to earn.' }));
+    LEVELS.forEach(L => {
+      const b = el('button','sheetrow' + (level === L.id ? ' cur' : ''));
+      b.type = 'button';
+      const t = el('div');
+      t.append(el('div','sheetrow-n', L.name));
+      t.append(el('div','sheetrow-m', L.sub + ' · starts at ' + L.weekLow + ' to ' + L.weekHigh + ' sets per muscle per week'));
+      b.append(t);
+      b.onclick = () => { level = L.id; S.profile.level = L.id; save(); draw(); };
+      inner.append(b);
+    });
+
+    nav(null, 1, 'Next');
+  }
+
+  /* ---- step 1: schedule ---- */
+  function drawSchedule() {
+    header(onboarding ? 'First run' : 'Five weeks, then a deload', 'Your schedule');
+
+    inner.append(el('div','eyebrow','Goal'));
+    const gr = el('div','opts triple');
+    [['gain','Build muscle'],['cut','Lose fat'],['maintain','Maintain']].forEach(([v, lab]) => {
+      const b = el('button','opt', lab); b.type = 'button';
+      b.setAttribute('aria-pressed', String(goal === v));
+      b.onclick = () => { goal = v; S.profile.goal = v; save(); draw(); };
+      gr.append(b);
+    });
+    inner.append(gr);
+
+    inner.append(el('div','eyebrow','Days per week'));
+    const dr = el('div','opts triple');
+    [2,3,4,5,6].forEach(nn => {
+      const b = el('button','opt', String(nn)); b.type = 'button';
+      b.setAttribute('aria-pressed', String(days === nn));
+      b.onclick = () => { days = nn; draw(); };
+      dr.append(b);
+    });
+    inner.append(dr);
+
+    inner.append(el('div','eyebrow','Time per session'));
+    const mr = el('div','opts triple');
+    [30,45,60,75,90].forEach(nn => {
+      const b = el('button','opt', nn + ' min'); b.type = 'button';
+      b.setAttribute('aria-pressed', String(minutes === nn));
+      b.onclick = () => { minutes = nn; draw(); };
+      mr.append(b);
+    });
+    inner.append(mr);
+
+    const sh = sessionShape({ minutes, level, goal });
+    inner.append(Object.assign(el('div','alert good'), { innerHTML:
+      '<b>' + minutes + ' minutes buys about ' + sh.setBudget + ' working sets</b>' +
+      'So each session gets ' + sh.slotCount + ' lifts, ' + sh.setsPrimary + ' sets on the main ones and ' +
+      sh.setsOther + ' on the rest. Change the minutes and those numbers move with it, which is the whole point of asking.' }));
+
+    nav(onboarding ? 0 : null, 2, 'See programmes');
+  }
+
+  /* ---- step 2: the library ---- */
+  function drawPrograms() {
+    const list = matches();
+    header(list.length + ' programmes fit', 'Pick a programme');
+    inner.append(Object.assign(el('p','hint'), { textContent:
+      'Filtered to ' + levelById(level).name.toLowerCase() + ', ' + days + ' days a week, ' + minutes +
+      ' minute sessions. Each one lays out differently across your days; the lifts inside are all swappable afterwards.' }));
+    if (!list.find(p => p.id === programId)) programId = list[0].id;
+
+    list.forEach(pr => {
+      const b = el('button','sheetrow' + (programId === pr.id ? ' cur' : ''));
+      b.type = 'button';
+      const t = el('div');
+      t.append(el('div','sheetrow-n', pr.name));
+      t.append(el('div','sheetrow-m', pr.blurb));
+      b.append(t);
+      b.onclick = () => { programId = pr.id; draw(); };
+      inner.append(b);
+    });
+
+    nav(1, 3, 'Build it');
+  }
+
+  /* ---- step 3: review and start ---- */
+  function drawReview() {
+    const pr = programById(programId);
+    header(pr.name, onboarding ? 'Your first block' : 'New mesocycle');
+    inner.append(Object.assign(el('p','hint'), { textContent: pr.blurb }));
+
+    const vol = muscleVolume(draft, SLOTS);
+    const L = levelById(level);
+    inner.append(el('div','eyebrow','Hard sets per muscle, per week'));
+    inner.append(Object.assign(el('div','qs'), { textContent:
+      'Counted fractionally: a press is a full set for the chest and half a set for the triceps and front delts. Your band at ' +
+      L.name.toLowerCase() + ' is ' + L.weekLow + ' to ' + L.weekHigh +
+      '. Ten a week is the floor the research supports for growth; below that maintains rather than builds.' }));
+    const vg = el('div','volgrid');
+    const rank = m => (MAJOR_MUSCLES.indexOf(m) < 0 ? 1 : 0);
+    Object.entries(vol)
+      .sort((a, b) => rank(a[0]) - rank(b[0]) || b[1] - a[1])
+      .forEach(([m, n]) => {
+        const major = MAJOR_MUSCLES.indexOf(m) >= 0;
+        const cell = el('div','volcell' + (!major ? ' minor' : n >= 10 ? ' good' : n >= 6 ? ' ok' : ' low'));
+        cell.append(Object.assign(el('span','volnum'), { textContent: String(n) }));
+        cell.append(Object.assign(el('span','vollbl'), { textContent: MUSCLE_NAME[m] || m }));
+        vg.append(cell);
+      });
+    inner.append(vg);
+    // Ten a week is the evidence floor and the pass mark. The level band is
+    // shown as context, because holding a two-day programme to an advanced
+    // lifter's twenty would flag everything and teach you to ignore the flag.
+    const under = Object.entries(vol)
+      .filter(([m, n]) => MAJOR_MUSCLES.indexOf(m) >= 0 && n < 10).length;
+    const verdict = el('div','alert ' + (under === 0 ? 'good' : under <= 3 ? 'warn' : 'bad'));
+    verdict.innerHTML = under === 0
+      ? '<b>Every muscle you train directly clears ten sets a week</b>This is a building programme. Your band at ' +
+        L.name.toLowerCase() + ' runs to ' + L.weekHigh + ', so there is room to add later if progress stalls.'
+      : '<b>' + under + ' muscle group' + (under === 1 ? '' : 's') + ' below ten sets a week</b>' +
+        (days <= 2
+          ? 'Two days a week cannot reach ten sets for everything without very long sessions. That is a limit of the schedule, not a flaw in the plan. It will hold what you have and build the priorities slowly, which is a reasonable trade in a deficit.'
+          : minutes <= 35
+          ? 'Thirty minute sessions buy about seven working sets. There is no arrangement of seven sets that gets every muscle to ten across ' + days + ' days. This is a maintain-and-nudge programme, which is the honest trade for the time.'
+          : 'Add a day or fifteen minutes, or pick a programme that emphasises them, and most of these clear the bar.');
+    inner.append(verdict);
+
+    inner.append(el('div','eyebrow','The sessions'));
+    draft.forEach(d => {
+      const card = el('div','daycard');
+      const h = el('div','row');
+      h.append(Object.assign(el('span','lift-n'), { textContent: d.name }));
+      h.append(el('span','spacer'));
+      h.append(Object.assign(el('span','lift-t'), { textContent: '~' + d.minutes + ' min · ' + d.slots.length + ' lifts' }));
+      card.append(h);
+      d.slots.forEach(p2 => {
+        const r = el('div','planrow');
+        const b2 = el('span','lift-b');
+        b2.append(el('span','ex-slot', (SLOTS.find(x => x.id === p2.slot) || {}).name || p2.slot));
+        b2.append(el('span','lift-n', byId(p2.exId).name));
+        r.append(b2);
+        r.append(el('span','spacer'));
+        r.append(Object.assign(el('span','lift-t'), { textContent: p2.sets + '×' + p2.repLow + '–' + p2.repHigh }));
+        card.append(r);
+      });
+      inner.append(card);
+    });
+
+    const go = el('button','btn primary block', onboarding ? 'Start lifting' : 'Start this mesocycle');
+    go.style.marginTop = '14px';
+    go.onclick = () => {
+      if (!onboarding && !confirm('Replace your current programme and restart at week 1?\n\nLogged sessions and bodyweight history are kept.')) return;
+      S.days = draft.map(d => ({ name: d.name, slots: d.slots }));
+      S.setup = { days, minutes };
+      S.profile.level = level; S.profile.goal = goal; S.profile.programId = programId;
+      S.profile.onboarded = true;
+      S.week = 1; S.cur = 0; S.draft = null; S.preview = null; S.lastSummary = null;
+      save(); closeSheet(); current = 'train'; render();
+    };
+    const back = el('button','btn block ghost','Back');
+    back.style.marginTop = '8px';
+    back.onclick = () => { step = 2; draw(); };
+    inner.append(go); inner.append(back);
+    inner.append(Object.assign(el('p','tiny'), { textContent:
+      'Every lift can be swapped for another that trains the same muscles, body groups can be added to any day, and the order dragged around, once the block is running. Logged history and weigh-ins are never touched.' }));
+  }
+}
+
+/* ---- add a body group, then a lift for it, to one session ---- */
+function openAddSlot(dayIdx) {
+  closeSheet();
+  let slot = null;
+  sheetEl = el('div','sheet');
+  sheetEl.setAttribute('role','dialog');
+  sheetEl.setAttribute('aria-modal','true');
+  sheetEl.setAttribute('aria-label','Add a lift');
   sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); render(); } };
   const inner = el('div','sheet-inner');
   sheetEl.append(inner);
@@ -800,93 +1254,85 @@ function openMesoWizard() {
   draw();
 
   function draw() {
-    draft = generatePlan({ days, minutes, goal: S.profile.goal }, EX, SUBS);
     inner.innerHTML = '';
-
     const head = el('div','sheet-h');
     const t = el('div');
-    t.append(el('div','ex-slot','Five weeks, then a deload'));
-    t.append(Object.assign(el('h2'), { textContent: 'New mesocycle' }));
+    t.append(el('div','ex-slot', S.days[dayIdx].name));
+    t.append(Object.assign(el('h2'), { textContent: slot ? 'Pick a lift' : 'Add a body group' }));
     head.append(t); head.append(el('div','spacer'));
     const x = el('button','btn sm ghost','Close');
     x.onclick = () => { closeSheet(); render(); };
     head.append(x);
     inner.append(head);
 
-    inner.append(el('div','eyebrow','Days per week'));
-    const dr = el('div','opts triple');
-    [2,3,4,5].forEach(n => {
-      const b = el('button','opt', String(n)); b.type = 'button';
-      b.setAttribute('aria-pressed', String(days === n));
-      b.onclick = () => { days = n; draw(); };
-      dr.append(b);
-    });
-    inner.append(dr);
-
-    inner.append(el('div','eyebrow','Time per session'));
-    const mr = el('div','opts triple');
-    [30,45,60,75].forEach(n => {
-      const b = el('button','opt', n + ' min'); b.type = 'button';
-      b.setAttribute('aria-pressed', String(minutes === n));
-      b.onclick = () => { minutes = n; draw(); };
-      mr.append(b);
-    });
-    inner.append(mr);
-
-    // weekly hard sets, checked against the evidence range
-    const vol = weeklyVolume(draft, 3, setsForWeek);
-    inner.append(el('div','eyebrow','Hard sets per muscle, per week'));
-    inner.append(Object.assign(el('div','qs'), { textContent:
-      'At week 3, the middle of the block. Around ten or more per muscle is the range the research supports for growth. Below that maintains rather than builds.' }));
-    const vg = el('div','volgrid');
-    Object.entries(vol).sort((a, b) => b[1] - a[1]).forEach(([slot, n]) => {
-      const cell = el('div','volcell' + (n >= 10 ? ' good' : n >= 6 ? ' ok' : ' low'));
-      cell.append(Object.assign(el('span','volnum'), { textContent: String(n) }));
-      cell.append(Object.assign(el('span','vollbl'), { textContent: SLOT_MUSCLE[slot] || slot }));
-      vg.append(cell);
-    });
-    inner.append(vg);
-    const under = Object.entries(vol).filter(([, n]) => n < 10).length;
-    const verdict = el('div','alert ' + (under === 0 ? 'good' : under <= 3 ? 'warn' : 'bad'));
-    verdict.innerHTML = under === 0
-      ? '<b>Every muscle is in the growth range</b>This is a building programme.'
-      : '<b>' + under + ' muscle group' + (under === 1 ? '' : 's') + ' below ten sets</b>' +
-        (days <= 2
-          ? 'Two days a week cannot reach ten sets for everything without very long sessions. That is a real limit of the schedule, not a flaw in the plan. It will hold what you have and build the lagging areas slowly, which is a reasonable trade in a deficit.'
-          : 'Add a day or ten minutes and most of these clear the bar.');
-    inner.append(verdict);
-
-    inner.append(el('div','eyebrow','The sessions'));
-    draft.forEach(d => {
-      const card = el('div','daycard');
-      const h = el('div','row');
-      h.append(Object.assign(el('span','lift-n'), { textContent: d.name }));
-      h.append(el('span','spacer'));
-      h.append(Object.assign(el('span','lift-t'), { textContent: '~' + d.minutes + ' min \u00b7 ' + d.slots.length + ' lifts' }));
-      card.append(h);
-      d.slots.forEach(p2 => {
-        const r = el('div','planrow');
-        const b2 = el('span','lift-b');
-        b2.append(el('span','ex-slot', SLOTS.find(x => x.id === p2.slot).name));
-        b2.append(el('span','lift-n', byId(p2.exId).name));
-        r.append(b2);
-        card.append(r);
+    if (!slot) {
+      inner.append(Object.assign(el('p','hint'), { textContent:
+        'This adds one slot to this session only. It counts toward the weekly sets the app tracks, but it does not change the planned volume of the lifts already there.' }));
+      const already = new Set(S.days[dayIdx].slots.map(p => p.slot));
+      SLOTS.forEach(sl => {
+        const n = (SUBS[sl.id] || []).length;
+        if (!n) return;
+        const b = el('button','sheetrow'); b.type = 'button';
+        const d2 = el('div');
+        d2.append(el('div','sheetrow-n', sl.name));
+        d2.append(el('div','sheetrow-m', n + ' lifts' +
+          (already.has(sl.id) ? ' · already in this session' : '')));
+        b.append(d2);
+        b.append(el('span','spacer'));
+        b.append(el('span','chev','›'));
+        b.onclick = () => { slot = sl.id; draw(); };
+        inner.append(b);
       });
-      inner.append(card);
+      return;
+    }
+
+    const sl = SLOTS.find(x2 => x2.id === slot);
+    inner.append(Object.assign(el('p','hint'), { textContent:
+      'Ordered by how much they ask of the joints, gentlest first.' }));
+    (SUBS[slot] || []).forEach(id => {
+      const ex = byId(id);
+      if (!ex) return;
+      const b = el('button','sheetrow'); b.type = 'button';
+      const d2 = el('div');
+      d2.append(el('div','sheetrow-n', ex.name));
+      d2.append(el('div','sheetrow-m', (ex.equip || '') + ' · ' + ex.cue));
+      b.append(d2);
+      b.onclick = () => { commit(ex); };
+      inner.append(b);
     });
 
-    const go = el('button','btn primary block','Start this mesocycle');
-    go.style.marginTop = '14px';
-    go.onclick = () => {
-      if (!confirm('Replace your current programme and restart at week 1?\n\nLogged sessions and bodyweight history are kept.')) return;
-      S.days = draft.map(d => ({ name: d.name, slots: d.slots }));
-      S.setup = { days, minutes };
-      S.week = 1; S.cur = 0; S.draft = null; S.preview = null; S.lastSummary = null;
-      save(); closeSheet(); current = 'train'; render();
+    const custom = el('div','custom');
+    custom.append(el('div','eyebrow','Not in the list'));
+    const ci = el('input'); ci.type = 'text'; ci.id = 'addCustom';
+    ci.placeholder = 'Name of the machine or lift';
+    ci.style.textAlign = 'left';
+    custom.append(ci);
+    const cb = el('button','btn sm block','Add it');
+    cb.style.marginTop = '8px';
+    cb.onclick = () => {
+      const name = ci.value.trim();
+      if (!name) { ci.focus(); return; }
+      commit(addCustomEx(name, slot));
     };
-    inner.append(go);
-    inner.append(Object.assign(el('p','tiny'), { textContent:
-      'Every lift can be swapped for another that trains the same muscles, and the order dragged around, once the block is running. Your logged history and weigh-ins are not touched.' }));
+    custom.append(cb);
+    inner.append(custom);
+
+    const back = el('button','btn block ghost','Back to body groups');
+    back.style.marginTop = '12px';
+    back.onclick = () => { slot = null; draw(); };
+    inner.append(back);
+  }
+
+  function commit(ex) {
+    const sh = sessionShape({ minutes: (S.setup && S.setup.minutes) || 50,
+                              level: S.profile.level, goal: S.profile.goal });
+    const iso = ['biceps','triceps','calves','core','arms'].includes(ex.slot);
+    S.days[dayIdx].slots.push({
+      slot: ex.slot, exId: ex.id, sets: sh.setsOther,
+      repLow: iso ? sh.isoLow : sh.repLow, repHigh: iso ? sh.isoHigh : sh.repHigh,
+      load: null, misses: 0, primary: false
+    });
+    save(); closeSheet(); render();
   }
 }
 
@@ -1086,7 +1532,7 @@ views.daily = root => {
   dIn.setAttribute('aria-label', 'Date of weigh-in');
 
   const wIn = el('input'); wIn.type = 'number'; wIn.step = '0.1'; wIn.inputMode = 'decimal';
-  wIn.id = 'weighLb'; wIn.placeholder = 'lb'; wIn.style.flex = '1 1 90px';
+  wIn.id = 'weighLb'; wIn.placeholder = uLabel(); wIn.style.flex = '1 1 90px';
   wIn.setAttribute('aria-label', 'Weight in pounds');
   const onDate = () => {
     weighDate = dIn.value || today();
@@ -1098,7 +1544,7 @@ views.daily = root => {
 
   const sv = el('button','btn primary','Record');
   sv.onclick = () => {
-    const lb = Number(wIn.value);
+    const lb = stored(wIn.value);
     if (!lb || lb <= 0) { wIn.focus(); return; }
     const day = S.daily[weighDate] || (S.daily[weighDate] = { water:0, sleep:'', protein:'', weight:'' });
     const prev = previousWeight(weighDate);
@@ -1113,10 +1559,10 @@ views.daily = root => {
   if (weighFlash) {
     const a = el('div','alert good');
     const dl = weighFlash.delta;
-    a.innerHTML = '<b>Recorded ' + weighFlash.lb.toFixed(1) + ' lb for ' + esc(prettyDate(weighFlash.date)) + '</b>' +
+    a.innerHTML = '<b>Recorded ' + disp(weighFlash.lb).toFixed(1) + ' ' + uLabel() + ' for ' + esc(prettyDate(weighFlash.date)) + '</b>' +
       (dl == null ? 'First weigh-in on record.'
        : dl === 0 ? 'No change since the last one.'
-       : Math.abs(dl).toFixed(1) + ' lb ' + (dl < 0 ? 'down from' : 'up on') + ' your last weigh-in.');
+       : Math.abs(disp(dl)).toFixed(1) + ' ' + uLabel() + ' ' + (dl < 0 ? 'down from' : 'up on') + ' your last weigh-in.');
     c4.append(a);
   }
 
@@ -1129,7 +1575,7 @@ views.daily = root => {
       const r = el('div','weighrow');
       r.append(el('span','weigh-d', prettyDate(e.date)));
       r.append(el('span','spacer'));
-      r.append(el('span','weigh-v', e.lb.toFixed(1)));
+      r.append(el('span','weigh-v', disp(e.lb).toFixed(1)));
       const dl = prev ? Math.round((e.lb - prev.lb) * 10) / 10 : null;
       const chip = el('span','weigh-c' + (dl == null ? '' : dl < 0 ? ' down' : dl > 0 ? ' up' : ''));
       chip.textContent = dl == null ? '—' : (dl > 0 ? '+' : dl < 0 ? '\u2212' : '') + Math.abs(dl).toFixed(1);
@@ -1249,7 +1695,7 @@ views.body = root => {
       const s2 = el('div','stats'); s2.style.marginTop = '14px';
       s2.append(stat(bf.point + '%', 'Estimate', ''));
       s2.append(stat(bf.low + '–' + bf.high + '%', 'Real range', ''));
-      if (wt) s2.append(stat((wt * (1 - bf.point / 100)).toFixed(0), 'Lean lb', ''));
+      if (wt) s2.append(stat(disp(wt * (1 - bf.point / 100)).toFixed(0), 'Lean ' + uLabel(), ''));
       b.append(s2);
       b.append(el('p','tiny','This method runs about three to four points off a DEXA scan, so the range is the honest answer and the single number is not. Measured the same way each time it tracks direction well, which is the only thing you need it for.'));
     }
@@ -1313,7 +1759,7 @@ views.progress = root => {
   const vol = S.sessions.slice(-1)[0].entries.reduce((t,e) =>
     t + e.sets.reduce((a,s) => a + s.reps * s.load, 0), 0);
   st.append(stat(S.sessions.length, 'Sessions', ''));
-  st.append(stat(Math.round(vol).toLocaleString(), 'Last tonnage lb', ''));
+  st.append(stat(Math.round(disp(vol)).toLocaleString(), 'Last tonnage ' + uLabel(), ''));
   const jf = S.sessions.flatMap(s => s.entries).filter(e => e.joint && e.joint.sev >= 2).length;
   st.append(stat(jf, 'Joint swaps', ''));
   c.append(st);
@@ -1372,15 +1818,17 @@ views.settings = root => {
   c.append(el('h2','','Profile'));
   const fields = [
     ['age','Age','number'],
-    ['startWeight','Start weight (lb)','number'], ['targetWeight','Target weight (lb)','number']
+    ['startWeight','Start weight (' + uLabel() + ')','number'], ['targetWeight','Target weight (' + uLabel() + ')','number']
   ];
   const field = (k, label, type) => {
     const w = el('div'); w.style.margin = '0 0 12px';
     w.append(el('div','lbl', label));
-    const i = el('input'); i.type = type; i.value = S.profile[k];
+    const isW = k === 'startWeight' || k === 'targetWeight';
+    const i = el('input'); i.type = type;
+    i.value = isW ? disp(S.profile[k]) : S.profile[k];
     i.id = 'pf-' + k;
     i.setAttribute('aria-label', label);
-    i.oninput = () => { S.profile[k] = Number(i.value); save(); };
+    i.oninput = () => { S.profile[k] = isW ? stored(i.value) : Number(i.value); save(); };
     w.append(i); return w;
   };
   c.append(field('age', 'Age', 'number'));
@@ -1438,6 +1886,36 @@ views.settings = root => {
   fw.append(fr);
   c.append(fw);
 
+  const uw = el('div'); uw.style.margin = '0 0 12px';
+  uw.append(el('div','lbl','Units'));
+  const ur = el('div','opts triple');
+  [['lb','Pounds'],['kg','Kilograms']].forEach(([v, label]) => {
+    const b = el('button','opt', label); b.type = 'button';
+    b.setAttribute('aria-pressed', String(U() === v));
+    b.onclick = () => { S.profile.unit = v; save(); render(); };
+    ur.append(b);
+  });
+  uw.append(ur);
+  uw.append(Object.assign(el('p','tiny'), { textContent:
+    'Everything is stored in pounds and converted on the way in and out, so switching back and forth never rounds your history away.' }));
+  c.append(uw);
+
+  const lw = el('div'); lw.style.margin = '0 0 12px';
+  lw.append(el('div','lbl','Lifting experience'));
+  lw.append(Object.assign(el('p','tiny'), { textContent:
+    'Sets your weekly set band and how hard a load increase is to earn. Novices can add weight most sessions, advanced lifters earn it over weeks.' }));
+  LEVELS.forEach(L => {
+    const b = el('button','sheetrow' + (S.profile.level === L.id ? ' cur' : ''));
+    b.type = 'button';
+    const t = el('div');
+    t.append(el('div','sheetrow-n', L.name));
+    t.append(el('div','sheetrow-m', L.sub + ' \u00b7 ' + L.weekLow + '\u2013' + L.weekHigh + ' sets per muscle per week'));
+    b.append(t);
+    b.onclick = () => { S.profile.level = L.id; save(); render(); };
+    lw.append(b);
+  });
+  c.append(lw);
+
   const ap = el('button','opt');
   ap.setAttribute('aria-pressed', String(!!S.profile.appetiteSuppressed));
   ap.append(el('span','dot'));
@@ -1458,12 +1936,13 @@ views.settings = root => {
     'Which session is next is set from the week badge at the top of the screen.' }));
   const nm = el('button','btn primary block','Build a new mesocycle');
   nm.style.marginTop = '12px';
-  nm.onclick = openMesoWizard;
+  nm.onclick = () => openMesoWizard();
   w.append(nm);
   w.append(Object.assign(el('p','tiny'), { textContent:
-    'Choose days per week and how long you have, and it builds the block around that. Currently ' +
+    'Twenty-four programmes, filtered to your experience, days and session length. Currently running ' +
+    programById(S.profile.programId).name + ', ' +
     ((S.setup && S.setup.days) || S.days.length) + ' days a week at about ' +
-    ((S.setup && S.setup.minutes) || 50) + ' minutes.' }));
+    ((S.setup && S.setup.minutes) || 50) + ' minutes. Change the minutes and the sets and reps change with them.' }));
   root.append(w);
 
   const d = el('div','card');
@@ -1513,6 +1992,9 @@ $('#themeBtn').onclick = () => {
   save(); applyTheme();
 };
 render();
+// A first run asks who is lifting before showing a programme built for someone
+// else. Anyone with history already skips this.
+if (!S.profile.onboarded && !(S.sessions && S.sessions.length)) openMesoWizard({ onboarding: true });
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
