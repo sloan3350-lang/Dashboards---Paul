@@ -104,6 +104,19 @@ function parseState(raw) {
   // Browsing ahead is a look, not a place. A reload always lands back on
   // the live session, so nobody reopens the app into a read-only screen.
   st.preview = null;
+  (st.days || []).forEach(d => (d.slots || []).forEach(p => { if (!p.uid) p.uid = newUid(); }));
+  // A draft saved under the old type keys is moved onto the first lift of that
+  // type in the session, so nothing already logged is dropped by the upgrade.
+  if (st.draft && st.draft.entries && st.days[st.draft.day]) {
+    const slots = st.days[st.draft.day].slots;
+    const re = {};
+    Object.keys(st.draft.entries).forEach(k => {
+      if (slots.some(p => p.uid === k)) { re[k] = st.draft.entries[k]; return; }
+      const target = slots.find(p => p.slot === k && !re[p.uid]);
+      if (target) re[target.uid] = st.draft.entries[k];
+    });
+    st.draft.entries = re;
+  }
   return st;
 }
 
@@ -131,6 +144,17 @@ function profileComplete(pf) {
   return clamp(pf.age, BOUNDS.age) !== '' &&
          clamp(pf.heightIn, [BOUNDS.feet[0] * 12, BOUNDS.feet[1] * 12 + 11.75]) !== '' &&
          clamp(pf.startWeight, BOUNDS.weightLb) !== '';
+}
+
+/* ---------------- lift identity ----------------
+ * Logged sets used to be filed under the slot TYPE ("squat"), so a lower day
+ * with two squat movements shared one entry: logging the second showed the
+ * first one's numbers, editing overwrote them, and finishing recorded the same
+ * sets twice. Every planned lift now carries its own id, and logged work is
+ * filed under that. */
+function newUid() { return 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function ensureUids() {
+  (S.days || []).forEach(d => (d.slots || []).forEach(p => { if (!p.uid) p.uid = newUid(); }));
 }
 
 /* ---------------- week rules (the ramp already locked in your program) ---------------- */
@@ -180,6 +204,7 @@ function applyTheme() {
 const views = {};
 let current = 'train';
 function render() {
+  ensureUids();
   ['train','daily','body','progress','settings'].forEach(v => {
     const node = $('#v-' + v);
     node.hidden = v !== current;
@@ -188,7 +213,7 @@ function render() {
   });
   const wb = $('#weekBadge');
   wb.textContent = S.preview
-    ? 'Wk ' + S.preview.week + ' \u00b7 ' + dayName(S.preview.day) + ' \u00b7 preview'
+    ? 'Wk ' + S.preview.week + ' \u00b7 ' + dayName(S.preview.day)
     : 'Wk ' + S.week + ' \u00b7 ' + dayName(S.cur) + (deloadWeekNow(S.week) ? ' \u00b7 deload' : '');
   wb.classList.toggle('previewing', !!S.preview);
   document.querySelectorAll('.tab').forEach(t =>
@@ -198,6 +223,52 @@ document.querySelectorAll('.tab').forEach(t =>
   t.addEventListener('click', () => { current = t.dataset.view; window.scrollTo(0,0); render(); }));
 
 /* =================== TRAIN =================== */
+/* ---------------- stepping through the block ----------------
+ * Every session of every week is one step in a line. The arrows walk that line;
+ * landing back on the live session leaves preview mode. Planned lifts are the
+ * same object in every week, so a swap made while looking ahead applies from
+ * then on, which is what a swap means. */
+function viewPos() { return S.preview || { week: S.week, day: S.cur }; }
+function stepView(delta) {
+  const D = S.days.length, W = blockWeeks();
+  const pv = viewPos();
+  const i = Math.max(0, Math.min(W * D - 1, (pv.week - 1) * D + pv.day + delta));
+  const week = Math.floor(i / D) + 1, day = i % D;
+  S.preview = (week === S.week && day === S.cur) ? null : { week, day };
+  save(); window.scrollTo(0, 0); render();
+}
+function sessionNav() {
+  const D = S.days.length, W = blockWeeks();
+  const pv = viewPos();
+  const i = (pv.week - 1) * D + pv.day;
+  const live = !S.preview;
+  const bar = el('div','card sessnav');
+  const prev = el('button','btn navarrow','‹');
+  prev.setAttribute('aria-label','Previous session');
+  prev.disabled = i <= 0;
+  prev.onclick = () => stepView(-1);
+  const next = el('button','btn navarrow','›');
+  next.setAttribute('aria-label','Next session');
+  next.disabled = i >= W * D - 1;
+  next.onclick = () => stepView(1);
+  const mid = el('div','navmid');
+  mid.append(el('div','navname', dayName(pv.day)));
+  const past = pv.week < S.week || (pv.week === S.week && pv.day < S.cur);
+  mid.append(el('div','navsub', 'Week ' + pv.week + ' of ' + W +
+    (deloadWeekNow(pv.week) ? ' · deload' : '') +
+    (live ? ' · today' : past ? ' · earlier' : ' · ahead')));
+  bar.append(prev, mid, next);
+  return bar;
+}
+/* The most recent finished session for a week and day, if there is one. */
+function loggedFor(week, day) {
+  for (let i = S.sessions.length - 1; i >= 0; i--) {
+    const x = S.sessions[i];
+    if (x.week === week && x.day === day) return x;
+  }
+  return null;
+}
+
 views.train = root => {
   // If load() had to fall back to the backup, say so once rather than letting a
   // missing session look like the app quietly ate it.
@@ -220,25 +291,42 @@ views.train = root => {
     S.draft = { day: dayIdx, date: today(), week: S.week, entries: {} };
   }
 
+  root.append(sessionNav());
+
   if (pv) {
+    const past = pv.week < S.week || (pv.week === S.week && pv.day < S.cur);
+    const rec = loggedFor(pv.week, pv.day);
     const banner = el('div','card preview');
-    banner.append(el('div','eyebrow','Previewing'));
+    banner.append(el('div','eyebrow', past ? 'Earlier session' : 'Looking ahead'));
     banner.append(Object.assign(el('h2'), { textContent: day.name + ' \u00b7 Week ' + week }));
-    banner.append(Object.assign(el('p','hint'), { textContent: weekBlurb(week) }));
+    banner.append(Object.assign(el('p','hint'), { textContent: past
+      ? (rec ? 'Logged on ' + rec.date + '. Numbers below are what you did.' : 'Nothing was logged for this one.')
+      : weekBlurb(week) }));
     banner.append(Object.assign(el('p','tiny'), { textContent:
-      'Looking ahead only. Nothing here is logged, and your current session is still ' +
-      dayName(S.cur) + ', week ' + S.week + '.' }));
-    const back = el('button','btn primary block','Back to ' + dayName(S.cur) + ', week ' + S.week);
+      'Swap or add a lift here and it changes this session for every week from now on. ' +
+      'Logging happens on today\u2019s session: ' + dayName(S.cur) + ', week ' + S.week + '.' }));
+    const back = el('button','btn primary block','Back to today\u2019s session');
     back.style.marginTop = '12px';
-    back.onclick = () => { S.preview = null; save(); render(); };
+    back.onclick = () => { S.preview = null; save(); window.scrollTo(0, 0); render(); };
     banner.append(back);
     root.append(banner);
 
     const list = el('div','card liftlist');
-    list.append(Object.assign(el('p','tiny listnote'), { textContent:
-      'Read only. Go back to your current session to log sets.' }));
-    plan.forEach((p, idx) => list.append(liftRow(p, idx, week, true)));
+    plan.forEach((p, idx) => {
+      const row = liftRow(p, idx, week, true);
+      const e = rec && rec.entries.find(x => x.exId === p.exId);
+      if (e && e.sets && e.sets.length) {
+        const b = row.querySelector('.lift-b');
+        b.append(el('span','setline', e.sets.map(x => disp(x.load) + '\u00d7' + x.reps).join('  \u00b7  ')));
+      }
+      list.append(row);
+    });
     root.append(list);
+
+    const add = el('button','btn sm block ghost','+ Add a lift to ' + day.name);
+    add.style.marginTop = '2px';
+    add.onclick = () => openAddSlot(dayIdx, add);
+    root.append(add);
     return;
   }
 
@@ -278,13 +366,21 @@ views.train = root => {
     a.innerHTML = '<b>Early deload recommended</b>' + esc(dl.reason) + '. Cut the sets in half and back off the effort this session.';
     body.append(a);
   }
-  const doneN = plan.filter(p => S.draft.entries[p.slot] && S.draft.entries[p.slot].done).length;
+  const doneN = plan.filter(p => S.draft.entries[p.uid] && S.draft.entries[p.uid].done).length;
   body.append(Object.assign(el('p','tiny'), { textContent:
     doneN ? doneN + ' of ' + plan.length + ' done. Take them in whatever order the machines are free.'
           : 'Take them in whatever order the machines are free. Tap a lift to log it.' }));
   head.append(body);
   root.append(head);
 
+  if (S.undo && !(S.lastSummary && S.lastSummary.lines && S.lastSummary.lines.length)) {
+    const u = el('div','card');
+    u.append(Object.assign(el('p','hint'), { textContent: 'Finished ' + S.undo.name + '. Tap below if you need to change anything in it.' }));
+    const re = el('button','btn sm block','Reopen ' + S.undo.name + ' to edit it');
+    re.onclick = undoFinish;
+    u.append(re);
+    root.append(u);
+  }
   if (S.lastSummary && S.lastSummary.lines && S.lastSummary.lines.length) {
     const sum = el('div','card summary');
     const sh = el('div','row');
@@ -294,6 +390,12 @@ views.train = root => {
     dis.onclick = () => { S.lastSummary = null; save(); render(); };
     sh.append(dis);
     sum.append(sh);
+    if (S.undo) {
+      const re = el('button','btn sm block','Reopen ' + S.undo.name + ' to edit it');
+      re.style.margin = '4px 0 10px';
+      re.onclick = undoFinish;
+      sum.append(re);
+    }
     sum.append(Object.assign(el('p','hint'), { textContent:
       S.lastSummary.name + ', week ' + S.lastSummary.week + ', ' + S.lastSummary.date +
       '. These carried straight into the targets below.' }));
@@ -320,9 +422,11 @@ views.train = root => {
   add.onclick = () => openAddSlot(dayIdx, add);
   root.append(add);
 
-  const fin = el('button','btn primary block','Finish session');
-  fin.style.marginTop = '12px';
-  fin.onclick = finishSession;
+  // Kept well clear of the last lift. A thumb that just closed the last sheet
+  // should not land on this.
+  const fin = el('button','btn primary block','Finish workout');
+  fin.style.marginTop = '36px';
+  fin.onclick = () => openFinish(fin);
   root.append(fin);
 
   const note = el('p','tiny');
@@ -345,8 +449,8 @@ function deloadCheckLocal() { return deloadCheck(S.week, deloadSignals(), blockW
 const dayName = i => (S.days[i] && S.days[i].name) || 'Session';
 
 function draftFor(p) {
-  return S.draft.entries[p.slot] ||
-    (S.draft.entries[p.slot] = { exId: p.exId, slot: p.slot, sets: [], setsPlanned: null,
+  return S.draft.entries[p.uid] ||
+    (S.draft.entries[p.uid] = { exId: p.exId, slot: p.slot, sets: [], setsPlanned: null,
                                  pump: 0, readiness: 0, joint: null, done: false });
 }
 
@@ -398,7 +502,7 @@ function liftRow(p, idx, week, preview) {
   }
   row.append(body);
   row.append(el('span','spacer'));
-  if (!preview) {
+  {
     const sw = el('button','rowswap');
     sw.type = 'button';
     sw.title = 'Swap ' + ex.name + ' for another lift that trains the same muscles';
@@ -758,7 +862,7 @@ function applySwap(p, exId, onDone) {
   // Sets logged against the old lift cannot follow it: reps of a leg press are
   // not reps of a belt squat, and the progression engine would read them as if
   // they were. So they go — but not silently, because they are work you did.
-  const d = S.draft && S.draft.entries[p.slot];
+  const d = S.draft && S.draft.entries[p.uid];
   const loggedSets = d ? d.sets.filter(x => x.reps !== '' && Number(x.reps) > 0).length : 0;
   if (loggedSets) {
     const old = byId(p.exId), nu = byId(exId);
@@ -767,7 +871,7 @@ function applySwap(p, exId, onDone) {
                  ' discards them, because those reps are not reps of the new lift.\n\nSwap anyway?')) return;
   }
   p.exId = exId; p.load = null; p.misses = 0;
-  if (d) delete S.draft.entries[p.slot];
+  if (d) delete S.draft.entries[p.uid];
   save(); closeSheet();
   if (onDone) onDone(); else render();
 }
@@ -913,14 +1017,89 @@ function registerCustom() {
   });
 }
 
+/* Finishing is the one action that cannot be edited afterwards, so it is never
+ * one tap. It shows what is logged and what is not, and asks. */
+function openFinish(anchorEl) {
+  closeSheet();
+  const plan = S.days[S.draft.day].slots;
+  const logged = plan.filter(p => {
+    const d = S.draft.entries[p.uid];
+    return d && d.sets.some(x => x.reps !== '' && Number(x.reps) > 0);
+  });
+  const missing = plan.filter(p => logged.indexOf(p) < 0);
+
+  sheetEl = el('div','sheet');
+  sheetEl.setAttribute('role','dialog');
+  sheetEl.setAttribute('aria-modal','true');
+  sheetEl.setAttribute('aria-label','Finish workout');
+  const inner = el('div','sheet-inner');
+  sheetEl.append(inner);
+
+  const head = el('div','sheet-h');
+  const t = el('div');
+  t.append(el('div','ex-slot', dayName(S.draft.day) + ' · Week ' + S.week));
+  t.append(Object.assign(el('h2'), { textContent: 'Finish this workout?' }));
+  head.append(t); head.append(el('div','spacer'));
+  const x = el('button','btn sm ghost','Close');
+  x.onclick = () => { closeSheet(); render(); };
+  head.append(x);
+  inner.append(head);
+
+  inner.append(Object.assign(el('div','alert ' + (missing.length ? 'warn' : 'good')), { innerHTML:
+    '<b>' + logged.length + ' of ' + plan.length + ' lifts logged</b>' +
+    (missing.length
+      ? 'Finishing now saves what is logged and moves on. The lifts below have nothing logged and will not count.'
+      : 'Everything is logged. Finishing saves it permanently and sets next session’s targets.') }));
+
+  if (missing.length) {
+    const ul = el('div','changes');
+    missing.forEach(p => {
+      const li = el('div','change');
+      li.append(el('span','change-b','–'));
+      li.append(el('span', null, byId(p.exId).name));
+      ul.append(li);
+    });
+    inner.append(ul);
+  }
+
+  const go = el('button','btn primary block','Finish and save');
+  go.style.marginTop = '16px';
+  go.disabled = !logged.length;
+  go.onclick = () => { closeSheet(); finishSession(); };
+  inner.append(go);
+  const keep = el('button','btn block ghost','Keep training');
+  keep.style.marginTop = '8px';
+  keep.onclick = () => { closeSheet(); render(); };
+  inner.append(keep);
+  if (!logged.length) inner.append(Object.assign(el('p','tiny'), { textContent: 'Log at least one lift first.' }));
+
+  mountSheet(anchorEl);
+}
+
+function undoFinish() {
+  if (!S.undo) return;
+  const cur = S.draft && Object.values(S.draft.entries || {}).some(d => d.sets && d.sets.some(x => x.reps));
+  if (!confirm('Reopen ' + S.undo.name + ' and put every lift back as it was before you finished?' +
+               (cur ? '\n\nAnything logged in the session after it will be discarded.' : ''))) return;
+  const u = JSON.parse(S.undo.snap);
+  S.days = u.days; S.week = u.week; S.cur = u.cur; S.draft = u.draft;
+  S.quarantine = u.quarantine; S.sessions = S.sessions.slice(0, u.sessionsLen);
+  S.lastSummary = u.lastSummary; S.undo = null; S.preview = null;
+  save(); current = 'train'; window.scrollTo(0, 0); render();
+}
+
 function finishSession() {
+  // Everything finishing touches, captured first. If this was a mis-tap, the
+  // summary card offers to put it all back exactly as it was.
+  const undoSnap = JSON.stringify({ days: S.days, week: S.week, cur: S.cur, draft: S.draft,
+    quarantine: S.quarantine, sessionsLen: S.sessions.length, lastSummary: S.lastSummary });
   const dayIdx = S.draft.day;
   const day = S.days[dayIdx];
   const plan = day.slots;
   const entries = [], changes = [];
 
   plan.forEach((p, idx) => {
-    const d = S.draft.entries[p.slot];
+    const d = S.draft.entries[p.uid];
     if (!d) return;
     const sets = d.sets.filter(s => s.reps !== '' && s.reps > 0)
                        .map(s => ({ reps: Number(s.reps), rir: Number(s.rir || 0), load: Number(s.load || 0) }));
@@ -982,6 +1161,7 @@ function finishSession() {
   save();
 
   S.lastSummary = { date: today(), name: day.name, week: S.week, lines: changes };
+  S.undo = { snap: undoSnap, name: day.name };
   save();
   current = 'train'; window.scrollTo(0, 0); render();
 }
@@ -1464,7 +1644,7 @@ function openMesoWizard(opts, anchorEl) {
       S.setup = { days, minutes, weeks };
       S.profile.level = level; S.profile.goal = goal; S.profile.programId = programId;
       S.profile.onboarded = true;
-      S.week = 1; S.cur = 0; S.draft = null; S.preview = null; S.lastSummary = null;
+      S.week = 1; S.cur = 0; S.draft = null; S.preview = null; S.lastSummary = null; S.undo = null;
       save(); closeSheet(); current = 'train'; render();
     };
     const back = el('button','btn block ghost','Back');
@@ -1653,7 +1833,7 @@ function openPlanPicker(anchorEl) {
       const set = el('button','btn block ghost','Make this my current session');
       set.style.marginTop = '8px';
       set.onclick = () => {
-        S.week = week; S.cur = dayIdx; S.preview = null; S.draft = null;
+        S.week = week; S.cur = dayIdx; S.preview = null; S.draft = null; S.undo = null;
         save(); closeSheet(); current = 'train'; render();
       };
       inner.append(set);

@@ -409,3 +409,15 @@ main{position:relative;z-index:1}
     background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none}
   body::before,body::after{display:none}
 }
+
+/* ---- session navigator: walk the block one session at a time ---- */
+.sessnav{display:flex;align-items:center;gap:10px;padding:8px 8px}
+.navarrow{min-width:52px;min-height:52px;font-size:28px;line-height:1;padding:0;font-family:var(--serif)}
+.navarrow:disabled{opacity:.25}
+.navmid{flex:1;text-align:center;min-width:0}
+.navname{font-family:var(--serif);font-size:19px;font-weight:600;
+         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.navsub{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+
+/* The badge can never push the theme button off the header. */
+.wk{min-width:0;max-width:62vw;overflow:hidden;text-overflow:ellipsis}
