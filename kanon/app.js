@@ -1017,6 +1017,11 @@ function openMesoWizard(opts, anchorEl) {
   let goal = S.profile.goal || 'gain';
   let programId = S.profile.programId || 'fullclassic';
   let draft = null;
+  // Lifts swapped by hand on the review screen. Keyed by day and position, and
+  // re-applied after every rebuild so changing nothing else does not undo them.
+  let picks = {};
+  let pickAt = null;            // {day, idx} while the picker is open
+  const clearPicks = () => { picks = {}; };
 
   sheetEl = el('div','sheet');
   sheetEl.setAttribute('role','dialog');
@@ -1102,11 +1107,18 @@ function openMesoWizard(opts, anchorEl) {
 
   function draw() {
     draft = buildProgram({ programId, days, minutes, level, goal, weeks }, EX, SUBS);
+    Object.keys(picks).forEach(k => {
+      const [di, si] = k.split(':').map(Number);
+      const slot = draft[di] && draft[di].slots[si];
+      const ex = byId(picks[k]);
+      if (slot && ex && ex.slot === slot.slot) slot.exId = ex.id;
+    });
     inner.innerHTML = '';
     if (step === 0) drawYou();
     if (step === 1) drawSchedule();
     if (step === 2) drawPrograms();
     if (step === 3) drawReview();
+    if (step === 4) drawPick();
     inner.scrollTop = 0;
   }
 
@@ -1181,7 +1193,7 @@ function openMesoWizard(opts, anchorEl) {
       t.append(el('div','sheetrow-n', L.name));
       t.append(el('div','sheetrow-m', L.sub + ' · starts at ' + L.weekLow + ' to ' + L.weekHigh + ' sets per muscle per week'));
       b.append(t);
-      b.onclick = () => { level = L.id; S.profile.level = L.id; save(); draw(); };
+      b.onclick = () => { level = L.id; S.profile.level = L.id; save(); clearPicks(); draw(); };
       inner.append(b);
     });
 
@@ -1197,7 +1209,7 @@ function openMesoWizard(opts, anchorEl) {
     [['gain','Build muscle'],['cut','Lose fat'],['maintain','Maintain']].forEach(([v, lab]) => {
       const b = el('button','opt', lab); b.type = 'button';
       b.setAttribute('aria-pressed', String(goal === v));
-      b.onclick = () => { goal = v; S.profile.goal = v; save(); draw(); };
+      b.onclick = () => { goal = v; S.profile.goal = v; save(); clearPicks(); draw(); };
       gr.append(b);
     });
     inner.append(gr);
@@ -1207,7 +1219,7 @@ function openMesoWizard(opts, anchorEl) {
     [2,3,4,5,6].forEach(nn => {
       const b = el('button','opt', String(nn)); b.type = 'button';
       b.setAttribute('aria-pressed', String(days === nn));
-      b.onclick = () => { days = nn; draw(); };
+      b.onclick = () => { days = nn; clearPicks(); draw(); };
       dr.append(b);
     });
     inner.append(dr);
@@ -1217,7 +1229,7 @@ function openMesoWizard(opts, anchorEl) {
     [30,45,60,75,90].forEach(nn => {
       const b = el('button','opt', nn + ' min'); b.type = 'button';
       b.setAttribute('aria-pressed', String(minutes === nn));
-      b.onclick = () => { minutes = nn; draw(); };
+      b.onclick = () => { minutes = nn; clearPicks(); draw(); };
       mr.append(b);
     });
     inner.append(mr);
@@ -1227,7 +1239,7 @@ function openMesoWizard(opts, anchorEl) {
     BLOCK_LENGTHS.forEach(nn => {
       const b = el('button','opt', nn + ' wk'); b.type = 'button';
       b.setAttribute('aria-pressed', String(weeks === nn));
-      b.onclick = () => { weeks = nn; draw(); };
+      b.onclick = () => { weeks = nn; clearPicks(); draw(); };
       wr.append(b);
     });
     inner.append(wr);
@@ -1282,13 +1294,95 @@ function openMesoWizard(opts, anchorEl) {
       t.append(n);
       t.append(el('div','sheetrow-m', pr.blurb));
       b.append(t);
-      b.onclick = () => { programId = pr.id; draw(); };
+      b.onclick = () => { programId = pr.id; clearPicks(); draw(); };
       inner.append(b);
     });
     if (goal === 'gain') inner.append(Object.assign(el('p','tiny'), { textContent:
       'Ten hard sets a week is the floor the research supports for growth. Below it a muscle holds rather than grows.' }));
 
     nav(1, 3, 'Build it');
+  }
+
+  /* ---- step 4: swap one lift, reached from the review screen ---- */
+  function drawPick() {
+    const d = draft[pickAt.day];
+    const p2 = d && d.slots[pickAt.idx];
+    if (!p2) { step = 3; draw(); return; }
+    const sl = SLOTS.find(x => x.id === p2.slot) || { name: p2.slot, muscles: [] };
+    const cur = byId(p2.exId);
+
+    const head = el('div','sheet-h');
+    const t = el('div');
+    t.append(el('div','ex-slot', d.name + ' · ' + sl.name));
+    t.append(Object.assign(el('h2'), { textContent: 'Swap this lift' }));
+    head.append(t); head.append(el('div','spacer'));
+    const back = el('button','btn sm ghost','Back');
+    back.onclick = () => { step = 3; draw(); };
+    head.append(back);
+    inner.append(head);
+    inner.append(Object.assign(el('p','hint'), { textContent:
+      'Everything here trains ' + (sl.muscles || []).join(', ') +
+      '. Listed gentlest on the joints first. Sets and reps stay as they are.' }));
+
+    const order = (SUBS[p2.slot] || []).slice();
+    EX.filter(e => e.slot === p2.slot && !order.includes(e.id)).forEach(e => order.push(e.id));
+    // Anything already used elsewhere in the week is still offered, just marked,
+    // since repeating a lift across two sessions is a choice, not an error.
+    const usedElsewhere = new Set();
+    draft.forEach((dd, di) => dd.slots.forEach((pp, si) => {
+      if (di !== pickAt.day || si !== pickAt.idx) usedElsewhere.add(pp.exId);
+    }));
+
+    order.forEach(id => {
+      const cand = byId(id);
+      if (!cand) return;
+      const isCur = id === p2.exId;
+      const row = el('button','sheetrow' + (isCur ? ' cur' : ''));
+      row.type = 'button';
+      row.disabled = isCur;
+      const left = el('div');
+      left.append(el('div','sheetrow-n', cand.name));
+      left.append(el('div','sheetrow-m',
+        (cand.equip ? cand.equip + ' · ' : '') + jointSummary(cand) +
+        (usedElsewhere.has(id) ? ' · already in another session' : '')));
+      row.append(left);
+      row.append(el('div','spacer'));
+      if (isCur) row.append(el('span','badge','Current'));
+      else row.append(el('span','chev','→'));
+      if (!isCur) row.onclick = () => {
+        picks[pickAt.day + ':' + pickAt.idx] = id;
+        step = 3; draw();
+      };
+      inner.append(row);
+    });
+
+    const cw = el('div','custom');
+    cw.append(el('div','q','Not on the list?'));
+    cw.append(Object.assign(el('div','qs'), { textContent:
+      'Type what the machine is actually called at your gym. It joins this slot permanently and progresses like any other lift.' }));
+    const row = el('div','row');
+    const ci = el('input'); ci.type = 'text'; ci.id = 'wizCustom';
+    ci.placeholder = 'e.g. Hammer Strength iso row';
+    ci.style.textAlign = 'left';
+    ci.setAttribute('aria-label', 'Name of your own exercise');
+    row.append(ci);
+    const add = el('button','btn primary sm','Add');
+    add.onclick = () => {
+      const name = ci.value.trim();
+      if (!name) { ci.focus(); return; }
+      const made = addCustomEx(name, p2.slot);
+      picks[pickAt.day + ':' + pickAt.idx] = made.id;
+      step = 3; draw();
+    };
+    ci.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add.click(); } };
+    row.append(add);
+    cw.append(row);
+    inner.append(cw);
+
+    const done = el('button','btn block ghost','Back to the block');
+    done.style.marginTop = '14px';
+    done.onclick = () => { step = 3; draw(); };
+    inner.append(done);
   }
 
   /* ---- step 3: review and start ---- */
@@ -1335,6 +1429,8 @@ function openMesoWizard(opts, anchorEl) {
     inner.append(verdict);
 
     inner.append(el('div','eyebrow','The sessions'));
+    inner.append(Object.assign(el('p','qs'), { textContent:
+      'Tap any lift to swap it for another that trains the same muscles, or to enter your own. Nothing is committed until you start the block.' }));
     draft.forEach(d => {
       const card = el('div','daycard');
       const h = el('div','row');
@@ -1342,14 +1438,19 @@ function openMesoWizard(opts, anchorEl) {
       h.append(el('span','spacer'));
       h.append(Object.assign(el('span','lift-t'), { textContent: '~' + d.minutes + ' min · ' + d.slots.length + ' lifts' }));
       card.append(h);
-      d.slots.forEach(p2 => {
-        const r = el('div','planrow');
+      d.slots.forEach((p2, si) => {
+        const di = draft.indexOf(d);
+        const r = el('button','planrow tappable');
+        r.type = 'button';
+        r.title = 'Swap ' + byId(p2.exId).name + ' for another lift that trains the same muscles';
         const b2 = el('span','lift-b');
         b2.append(el('span','ex-slot', (SLOTS.find(x => x.id === p2.slot) || {}).name || p2.slot));
         b2.append(el('span','lift-n', byId(p2.exId).name));
         r.append(b2);
         r.append(el('span','spacer'));
         r.append(Object.assign(el('span','lift-t'), { textContent: p2.sets + '×' + p2.repLow + '–' + p2.repHigh }));
+        r.append(el('span','chev','›'));
+        r.onclick = () => { pickAt = { day: di, idx: si }; step = 4; draw(); };
         card.append(r);
       });
       inner.append(card);

@@ -296,6 +296,10 @@ input::placeholder{color:var(--muted);opacity:.55;font-weight:400}
 .planlist{display:flex;flex-direction:column;margin-top:8px}
 .planrow{display:flex;align-items:center;gap:12px;padding:11px 2px;
          border-bottom:1px solid var(--line)}
+.planrow.tappable{width:100%;text-align:left;background:none;border-left:0;border-right:0;
+                  border-top:0;color:inherit;font:inherit;min-height:52px}
+.planrow.tappable .chev{color:var(--muted);font-size:17px;flex:none}
+.planrow.tappable:hover .lift-n,.planrow.tappable:focus-visible .lift-n{color:var(--accent)}
 .planrow:last-child{border-bottom:0}
 
 /* ---- mesocycle wizard ---- */
