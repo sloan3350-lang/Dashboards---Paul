@@ -37,12 +37,34 @@ const SETS_CAP_PER_SLOT = 4;
 
 /* ---------- per-exercise load progression ---------- */
 // sets: [{reps, rir, load}], target: {repLow, repHigh, rir, load}
-function nextLoad(sets, target, ex, priorMisses, levelId) {
+/* ---------------- returning from a layoff ----------------
+ * Muscle regains strength fast after a break; tendon and connective tissue do
+ * not. Loading a tendon at the rate an experienced lifter's muscles can
+ * suddenly handle again is exactly how a return-to-training injury happens.
+ * There is no single controlled trial behind the exact session counts below —
+ * this is the standard coaching heuristic (reduce load, re-earn tolerance over
+ * roughly two to four weeks of training before resuming full-speed
+ * progression) rather than a number from a specific paper, and the engine
+ * says so rather than dressing it up as more settled than it is. The counter
+ * is PER LIFT and ticks down once per logged session on that lift, since the
+ * exposure that matters is how many times a specific joint has taken the
+ * load again, not how many calendar weeks have passed. */
+const LAYOFFS = [
+  { id:'active', name:'Training now',               sub:'No layoff to plan around',                      rampSessions:0 },
+  { id:'short',  name:'Within the last 3 months',    sub:'Short enough that normal progression is fine',  rampSessions:0 },
+  { id:'medium', name:'3 months to a year off',      sub:'Muscle memory comes back fast; tendons lag behind it', rampSessions:6 },
+  { id:'long',   name:'Over a year off, or new to this', sub:'Start conservative for the first few weeks back', rampSessions:10 }
+];
+function layoffById(id) { return LAYOFFS.find(l => l.id === id) || LAYOFFS[0]; }
+
+function nextLoad(sets, target, ex, priorMisses, levelId, ramp) {
   const working = sets.filter(s => s.reps > 0);
-  if (!working.length) return { load: target.load, misses: priorMisses, note: 'no sets logged' };
+  const priorEarns = (ramp && ramp.priorEarns) || 0;
+  if (!working.length) return { load: target.load, misses: priorMisses, earns: priorEarns, note: 'no sets logged' };
 
   const L = levelById(levelId);
-  const step = loadStep(ex, levelId);
+  const rampActive = !!(ramp && ramp.active);
+  const fullStep = loadStep(ex, levelId);
   // Training age does not change the size of the jump much, it changes how hard
   // the jump is to earn. A novice can move almost every session, so the bar is
   // the top of the range minus a rep or two. An advanced lifter has to clear the
@@ -52,18 +74,27 @@ function nextLoad(sets, target, ex, priorMisses, levelId) {
   const badMiss = working.some(s => s.reps < target.repLow - 1);
 
   if (earned) {
-    return { load: target.load + step, misses: 0,
-             note: 'hit the target at target effort, load up ' + step + ' lb' };
+    // Coming back from a break: the first clear of a weight is proof the
+    // muscle can do it, not proof the tendon is ready to do it again heavier.
+    // Ask for a second clear at the same load before awarding the jump.
+    if (rampActive && priorEarns < 1) {
+      return { load: target.load, misses: 0, earns: priorEarns + 1,
+               note: 'hit the target, but easing back in after time off — one more session at this weight before the next increase' };
+    }
+    const step = rampActive ? Math.max(2.5, roundTo(fullStep / 2, 2.5)) : fullStep;
+    return { load: target.load + step, misses: 0, earns: 0,
+             note: 'hit the target at target effort, load up ' + step + ' lb' +
+                   (rampActive ? ' (half the usual jump while you rebuild tolerance)' : '') };
   }
   if (badMiss) {
     const misses = priorMisses + 1;
     if (misses >= 2) {
-      return { load: Math.max(step, roundTo(target.load * 0.9, step)), misses: 0,
+      return { load: Math.max(fullStep, roundTo(target.load * 0.9, fullStep)), misses: 0, earns: 0,
                note: 'missed the range twice running, backing load off 10% to rebuild' };
     }
-    return { load: target.load, misses, note: 'missed the range, same load again next time' };
+    return { load: target.load, misses, earns: 0, note: 'missed the range, same load again next time' };
   }
-  return { load: target.load, misses: 0, note: 'in range, same load, chase one more rep' };
+  return { load: target.load, misses: 0, earns: 0, note: 'in range, same load, chase one more rep' };
 }
 
 function roundTo(v, step) { return Math.max(step, Math.round(v / step) * step); }
@@ -721,7 +752,7 @@ function muscleVolume(days, SLOTS, setsOf) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { programScore, weekCapacity, setSlots, muscleVolume, MUSCLE_NAME, MAJOR_MUSCLES,
+  module.exports = { LAYOFFS, layoffById, programScore, weekCapacity, setSlots, muscleVolume, MUSCLE_NAME, MAJOR_MUSCLES,
                      BLOCK_LENGTHS, blockRir, isDeload, blockSets, LEVELS, levelById, loadStep, sessionShape, PROGRAMS, programsFor,
                      programById, buildProgram, jointAction, mildRun, JOINT_LEVELS,
                      toUnit, fromUnit, unitStep, suggestSet, SPLITS,

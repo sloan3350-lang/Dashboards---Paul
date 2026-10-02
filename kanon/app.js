@@ -18,7 +18,7 @@ function seed() {
   return {
     profile: { sex:'male', age:44, heightIn:70, goal:'cut', appetiteSuppressed:true, theme:'dark', figure:'male',
                startWeight:219, targetWeight:207, trainDays:'Tue / Sat',
-               level:'inter', unit:'lb', programId:'fullclassic', onboarded:false },
+               level:'inter', unit:'lb', programId:'fullclassic', onboarded:false, layoff:'short' },
     week: 1,
     cur: 0,
     days: [
@@ -99,6 +99,7 @@ function parseState(raw) {
   if (typeof st.cur !== 'number' || !st.days[st.cur]) st.cur = 0;
   if (!st.profile.level) st.profile.level = 'inter';
   if (!st.profile.unit) st.profile.unit = 'lb';
+  if (!st.profile.layoff) st.profile.layoff = 'short';
   if (!st.setup.weeks) st.setup.weeks = 5;
   if (st.profile.onboarded === undefined) st.profile.onboarded = st.sessions && st.sessions.length > 0;
   // Browsing ahead is a look, not a place. A reload always lands back on
@@ -454,14 +455,23 @@ function draftFor(p) {
                                  pump: 0, readiness: 0, joint: null, done: false });
 }
 
+// What you are actually lifting on this slot right now: the planned exercise,
+// unless a "just for today" substitute is in play. A permanent swap changes
+// p.exId directly and this never comes into it; the today-only case lives
+// entirely in S.draft.subs and evaporates when the draft does.
+function effectiveExId(p) {
+  return (S.draft && S.draft.subs && S.draft.subs[p.uid]) || p.exId;
+}
+
 function liftRow(p, idx, week, preview) {
-  const ex = byId(p.exId);
+  const subId = !preview && S.draft && S.draft.subs && S.draft.subs[p.uid];
+  const ex = byId(preview ? p.exId : effectiveExId(p));
   const d = preview ? null : draftFor(p);
   const planned = setsThisWeek(week, p);
   const nSets = d && d.setsPlanned != null ? d.setsPlanned : planned;
   const logged = d ? d.sets.filter(x => x.reps).length : 0;
 
-  const row = el('div','lift' + (d && d.done ? ' done' : '') + (preview ? ' preview' : ''));
+  const row = el('div','lift' + (d && d.done ? ' done' : '') + (d && d.skipped && !logged ? ' skipped' : '') + (preview ? ' preview' : ''));
   if (!preview) {
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
@@ -480,10 +490,15 @@ function liftRow(p, idx, week, preview) {
   }
   row.append(el('span','lift-i', String(idx + 1)));
   const body = el('span','lift-b');
-  body.append(el('span','ex-slot', SLOTS.find(s => s.id === p.slot).name));
+  body.append(el('span','ex-slot', SLOTS.find(s => s.id === p.slot).name + (subId ? ' \u00b7 today only' : '')));
   body.append(el('span','lift-n', ex.name));
-  body.append(el('span','lift-t', (p.load ? showLoad(p.load) : 'Finder set') +
-    ' \u00b7 ' + p.repLow + '\u2013' + p.repHigh + ' reps \u00b7 ' + nSets + ' set' + (nSets > 1 ? 's' : '')));
+  if (d && d.skipped && !logged) {
+    body.append(el('span','lift-t skipnote', 'Skipped today \u00b7 tap to log it instead'));
+  } else {
+    body.append(el('span','lift-t', (p.load ? showLoad(p.load) : 'Finder set') +
+      ' \u00b7 ' + p.repLow + '\u2013' + p.repHigh + ' reps \u00b7 ' + nSets + ' set' + (nSets > 1 ? 's' : '') +
+      (p.rampLeft ? ' \u00b7 easing back in' : '')));
+  }
 
   // What you actually logged stays on the row. The three feedback answers
   // collapse to one short line here rather than sitting open taking a screen.
@@ -596,7 +611,7 @@ function openLift(p, idx, anchorEl) {
   drawStep();
 
   function drawStep() {
-    const ex = byId(p.exId);
+    const ex = byId(effectiveExId(p));
     const nSets = setsThisWeek(S.week, p);
     const rir = rirForWeek(S.week);
     inner.innerHTML = '';
@@ -658,6 +673,10 @@ function openLift(p, idx, anchorEl) {
     sw.title = 'Replace this with another lift that trains the same muscles';
     sw.onclick = () => openSwap(p, () => openLift(p, idx, anchorEl), anchorEl);
     tools.append(sw);
+    const skip = el('button','btn sm ghost','Skip today');
+    skip.title = 'Leave this lift out of today\u2019s session, same as not logging it, but marked on purpose';
+    skip.onclick = () => { d.skipped = true; closeSheet(); render(); };
+    tools.append(skip);
     inner.append(tools);
 
     const hdr = el('div','setrow');
@@ -689,6 +708,7 @@ function openLift(p, idx, anchorEl) {
         inp.setAttribute('aria-label', 'Set ' + (i + 1) + ' ' + (f === 'load' ? 'weight' : f === 'reps' ? 'reps' : 'reps left in the tank'));
         inp.oninput = () => {
           d.sets[i][f] = inp.value === '' ? '' : (f === 'load' ? stored(inp.value) : Number(inp.value));
+          if (f === 'reps' && inp.value !== '') d.skipped = false;   // entering a real set overrides a skip
           save(); next.disabled = !anyReps();
         };
         r.append(inp);
@@ -872,6 +892,28 @@ function applySwap(p, exId, onDone) {
   }
   p.exId = exId; p.load = null; p.misses = 0;
   if (d) delete S.draft.entries[p.uid];
+  if (S.draft && S.draft.subs) delete S.draft.subs[p.uid];
+  save(); closeSheet();
+  if (onDone) onDone(); else render();
+}
+
+// A substitute for today only. The planned lift's load, misses and ramp
+// counter are not touched at all — they pick up again next time exactly
+// where they left off, because today's numbers belong to a different exercise
+// and are not comparable.
+function applySessionSwap(p, exId, onDone) {
+  if (!S.draft) { closeSheet(); if (onDone) onDone(); else render(); return; }
+  const d = S.draft.entries[p.uid];
+  const loggedSets = d ? d.sets.filter(x => x.reps !== '' && Number(x.reps) > 0).length : 0;
+  if (loggedSets) {
+    const old = byId((S.draft.subs && S.draft.subs[p.uid]) || p.exId), nu = byId(exId);
+    if (!confirm('You have ' + loggedSets + ' set' + (loggedSets > 1 ? 's' : '') +
+                 ' logged against ' + old.name + ' today.\n\nSwitching to ' + nu.name +
+                 ' just for today discards them.\n\nSwitch anyway?')) return;
+    delete S.draft.entries[p.uid];
+  }
+  S.draft.subs = S.draft.subs || {};
+  S.draft.subs[p.uid] = exId;
   save(); closeSheet();
   if (onDone) onDone(); else render();
 }
@@ -922,6 +964,12 @@ function openSwap(p, onDone, anchorEl) {
   const order = (SUBS[p.slot] || []).slice();
   // any custom lifts the user added to this slot, even if not in the preference list
   EX.filter(e => e.slot === p.slot && !order.includes(e.id)).forEach(e => order.push(e.id));
+  // "Just today" only means something on the session you can actually log
+  // against right now. Looking ahead or back at another week, there is no
+  // "today" to be just-for, so only the permanent choice is offered there.
+  const canToday = !S.preview && !!S.draft;
+  let mode = 'block';   // 'block' = rest of this mesocycle, 'today' = just this session
+  const effId = canToday ? effectiveExId(p) : p.exId;
 
   sheetEl = el('div','sheet');
   sheetEl.setAttribute('role','dialog');
@@ -930,69 +978,92 @@ function openSwap(p, onDone, anchorEl) {
   sheetEl.onclick = e => { if (e.target === sheetEl) { closeSheet(); if (onDone) onDone(); else render(); } };
 
   const inner = el('div','sheet-inner');
-  const head = el('div','sheet-h');
-  const ttl = el('div');
-  ttl.append(el('div','ex-slot', slot.name + ' \u00b7 ' + slot.muscles.join(', ')));
-  ttl.append(Object.assign(el('h2'), { textContent: 'Swap this lift' }));
-  head.append(ttl);
-  head.append(el('div','spacer'));
-  const x = el('button','btn sm ghost','Back');
-  x.onclick = () => { closeSheet(); if (onDone) onDone(); else render(); };
-  head.append(x);
-  inner.append(head);
-  inner.append(Object.assign(el('p','hint'), { textContent:
-    'Everything here trains the same muscles. Listed gentlest on the joints first, so if something hurts, work down from the top.' }));
-
-  order.forEach(id => {
-    const cand = byId(id);
-    if (!cand) return;
-    const isCur = id === p.exId;
-    const rest = S.quarantine[id];
-    const row = el('button','sheetrow' + (isCur ? ' cur' : ''));
-    row.type = 'button';
-    // The lift you are already on has nothing to do. It used to render as an
-    // ordinary enabled button that silently ignored taps, which reads as the app
-    // freezing rather than as "you are already here".
-    row.disabled = !!rest || isCur;
-    const left = el('div');
-    left.append(el('div','sheetrow-n', cand.name));
-    left.append(el('div','sheetrow-m',
-      rest ? 'Resting ' + rest + ' more session' + (rest > 1 ? 's' : '') + ' after a joint flag'
-           : jointSummary(cand)));
-    row.append(left);
-    row.append(el('div','spacer'));
-    if (isCur) row.append(el('span','badge','Current'));
-    else if (!rest) row.append(el('span','chev','\u2192'));
-    if (!isCur && !rest) row.onclick = () => applySwap(p, id, onDone);
-    inner.append(row);
-  });
-
-  // --- custom lift ---
-  const cwrap = el('div','custom');
-  cwrap.append(el('div','q','Not on the list?'));
-  cwrap.append(Object.assign(el('div','qs'), { textContent:
-    'Type whatever the machine is actually called at Crunch. It joins this slot permanently and progresses like any other lift.' }));
-  const crow = el('div','row');
-  const ci = el('input'); ci.type = 'text'; ci.placeholder = 'e.g. Hammer Strength iso row';
-  ci.style.textAlign = 'left'; ci.id = 'customLift';
-  ci.setAttribute('aria-label','Name of your own exercise');
-  crow.append(ci);
-  const cb = el('button','btn primary sm','Add');
-  cb.onclick = () => {
-    const name = ci.value.trim();
-    if (!name) { ci.focus(); return; }
-    applySwap(p, addCustomEx(name, p.slot).id, onDone);
-  };
-  ci.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); cb.click(); } };
-  crow.append(cb);
-  cwrap.append(crow);
-  cwrap.append(Object.assign(el('p','tiny'), { textContent:
-    'A custom lift starts with no joint profile, so it will not be offered automatically as a substitute until you tell it what hurts.' }));
-  inner.append(cwrap);
-
   sheetEl.append(inner);
+  draw();
+
+  function draw() {
+    inner.innerHTML = '';
+    const head = el('div','sheet-h');
+    const ttl = el('div');
+    ttl.append(el('div','ex-slot', slot.name + ' \u00b7 ' + slot.muscles.join(', ')));
+    ttl.append(Object.assign(el('h2'), { textContent: 'Swap this lift' }));
+    head.append(ttl);
+    head.append(el('div','spacer'));
+    const x = el('button','btn sm ghost','Back');
+    x.onclick = () => { closeSheet(); if (onDone) onDone(); else render(); };
+    head.append(x);
+    inner.append(head);
+
+    if (canToday) {
+      inner.append(el('div','eyebrow','How long should this swap last?'));
+      const mr = el('div','opts triple');
+      [['block','Rest of this block'],['today','Just today']].forEach(([v, lab]) => {
+        const b = el('button','opt', lab); b.type = 'button';
+        b.setAttribute('aria-pressed', String(mode === v));
+        b.onclick = () => { mode = v; draw(); };
+        mr.append(b);
+      });
+      inner.append(mr);
+      inner.append(Object.assign(el('p','tiny'), { textContent: mode === 'today'
+        ? 'For when the machine is taken or you are sore just this once. The planned lift keeps its own load history untouched and is back tomorrow.'
+        : 'Changes this slot for every remaining week of the block, until you swap it again or the block ends.' }));
+    }
+
+    inner.append(Object.assign(el('p','hint'), { textContent:
+      'Everything here trains the same muscles. Listed gentlest on the joints first, so if something hurts, work down from the top.' }));
+
+    order.forEach(id => {
+      const cand = byId(id);
+      if (!cand) return;
+      const isCur = id === (mode === 'today' ? effId : p.exId);
+      const rest = S.quarantine[id];
+      const row = el('button','sheetrow' + (isCur ? ' cur' : ''));
+      row.type = 'button';
+      // The lift you are already on has nothing to do. It used to render as an
+      // ordinary enabled button that silently ignored taps, which reads as the app
+      // freezing rather than as "you are already here".
+      row.disabled = !!rest || isCur;
+      const left = el('div');
+      left.append(el('div','sheetrow-n', cand.name));
+      left.append(el('div','sheetrow-m',
+        rest ? 'Resting ' + rest + ' more session' + (rest > 1 ? 's' : '') + ' after a joint flag'
+             : jointSummary(cand)));
+      row.append(left);
+      row.append(el('div','spacer'));
+      if (isCur) row.append(el('span','badge','Current'));
+      else if (!rest) row.append(el('span','chev','\u2192'));
+      if (!isCur && !rest) row.onclick = () =>
+        mode === 'today' ? applySessionSwap(p, id, onDone) : applySwap(p, id, onDone);
+      inner.append(row);
+    });
+
+    // --- custom lift ---
+    const cwrap = el('div','custom');
+    cwrap.append(el('div','q','Not on the list?'));
+    cwrap.append(Object.assign(el('div','qs'), { textContent: mode === 'today'
+      ? 'Type whatever you are actually using today. It will not be offered again automatically unless you add it properly later.'
+      : 'Type whatever the machine is actually called at Crunch. It joins this slot permanently and progresses like any other lift.' }));
+    const crow = el('div','row');
+    const ci = el('input'); ci.type = 'text'; ci.placeholder = 'e.g. Hammer Strength iso row';
+    ci.style.textAlign = 'left'; ci.id = 'customLift';
+    ci.setAttribute('aria-label','Name of your own exercise');
+    crow.append(ci);
+    const cb = el('button','btn primary sm','Add');
+    cb.onclick = () => {
+      const name = ci.value.trim();
+      if (!name) { ci.focus(); return; }
+      const made = addCustomEx(name, p.slot).id;
+      mode === 'today' ? applySessionSwap(p, made, onDone) : applySwap(p, made, onDone);
+    };
+    ci.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); cb.click(); } };
+    crow.append(cb);
+    cwrap.append(crow);
+    cwrap.append(Object.assign(el('p','tiny'), { textContent:
+      'A custom lift starts with no joint profile, so it will not be offered automatically as a substitute until you tell it what hurts.' }));
+    inner.append(cwrap);
+  }
+
   mountSheet(anchorEl);
-  x.focus();
 }
 
 // One place that mints a custom lift, used by both the swap sheet and the
@@ -1104,7 +1175,11 @@ function finishSession() {
     const sets = d.sets.filter(s => s.reps !== '' && s.reps > 0)
                        .map(s => ({ reps: Number(s.reps), rir: Number(s.rir || 0), load: Number(s.load || 0) }));
     if (!sets.length && !d.joint) return;
-    const ex = byId(p.exId);
+    // A today-only substitute (see applySessionSwap) is what was actually
+    // lifted; the planned lift's own load, misses and ramp counter are never
+    // touched by it, because today's numbers belong to a different exercise.
+    const subId = S.draft.subs && S.draft.subs[p.uid];
+    const ex = byId(subId || p.exId);
     const usedLoad = sets.length ? sets[0].load : (p.load || 0);
     const target = { repLow: p.repLow, repHigh: p.repHigh, rir: rirForWeek(S.week), load: p.load || usedLoad };
 
@@ -1117,9 +1192,14 @@ function finishSession() {
     const pulling = jAct.action === 'stop' || (jAct.action === 'swap' && d.joint.accept === true);
 
     if (pulling) {
-      const sub = substitute(p.exId, d.joint.joint, Object.keys(S.quarantine), EX, SUBS);
-      S.quarantine[p.exId] = 3;
-      if (sub) {
+      const sub = substitute(ex.id, d.joint.joint, Object.keys(S.quarantine), EX, SUBS);
+      S.quarantine[ex.id] = 3;
+      if (subId) {
+        // Only today's stand-in caused the pain; the planned lift was never
+        // touched today and is untouched by this too. It is simply back,
+        // as planned, next time.
+        changes.push(`${ex.name} (today's stand-in) is out for 3 sessions.`);
+      } else if (sub) {
         changes.push(`${ex.name} is out for 3 sessions. ${sub.name} takes the ${SLOTS.find(s=>s.id===p.slot).name.toLowerCase()} slot.`);
         p.exId = sub.id; p.load = null; p.misses = 0;
       } else {
@@ -1132,10 +1212,24 @@ function finishSession() {
     if (jAct.action === 'swap') {
       changes.push(`${ex.name}: ${jAct.title.toLowerCase()}, swap declined. Asked again next session.`);
     }
+    if (sets.length && subId) {
+      // Logged against a stand-in: record it, but there is nothing to
+      // progress on the planned lift from a different exercise's numbers.
+      changes.push(`${ex.name}: logged for today only. ${byId(p.exId).name} continues next time right where it left off.`);
+      entries.push({ exId: ex.id, slot: p.slot, sets, pump: d.pump, readiness: d.readiness,
+                     joint: d.joint, loadProgressed: false, perfDown: false });
+      return;
+    }
     if (sets.length) {
-      const r = nextLoad(sets, target, ex, p.misses || 0, S.profile.level);
+      const ramping = (p.rampLeft || 0) > 0;
+      const r = nextLoad(sets, target, ex, p.misses || 0, S.profile.level,
+                          { active: ramping, priorEarns: p.earns || 0 });
       const progressed = r.load > (p.load || 0);
-      p.load = r.load; p.misses = r.misses;
+      p.load = r.load; p.misses = r.misses; p.earns = r.earns;
+      if (ramping) {
+        p.rampLeft = Math.max(0, p.rampLeft - 1);
+        if (p.rampLeft === 0) changes.push(`${ex.name}: back to normal progression speed.`);
+      }
       const vd = volumeDecision(
         slotHistory(p.slot), { readiness: d.readiness || 1, jointMax: d.joint ? d.joint.sev : 0 },
         S.profile.goal, p.sets);
@@ -1374,6 +1468,21 @@ function openMesoWizard(opts, anchorEl) {
       t.append(el('div','sheetrow-m', L.sub + ' · starts at ' + L.weekLow + ' to ' + L.weekHigh + ' sets per muscle per week'));
       b.append(t);
       b.onclick = () => { level = L.id; S.profile.level = L.id; save(); clearPicks(); draw(); };
+      inner.append(b);
+    });
+
+    inner.append(el('div','eyebrow','When did you last train like this?'));
+    inner.append(Object.assign(el('div','qs'), { textContent:
+      'This is separate from experience on purpose. An intermediate lifter back after a year off still remembers the movements, but a tendon that has not taken load in a year is not ready for the same jumps an intermediate normally earns. Answering honestly here slows the first few weeks of load increases on purpose, whatever level you picked above.' }));
+    LAYOFFS.forEach(LO => {
+      const b = el('button','sheetrow' + ((S.profile.layoff || 'short') === LO.id ? ' cur' : ''));
+      b.type = 'button';
+      const t = el('div');
+      t.append(el('div','sheetrow-n', LO.name));
+      t.append(el('div','sheetrow-m', LO.sub +
+        (LO.rampSessions ? ' · first ' + LO.rampSessions + ' sessions per lift ease in at half speed' : '')));
+      b.append(t);
+      b.onclick = () => { S.profile.layoff = LO.id; save(); draw(); };
       inner.append(b);
     });
 
@@ -1640,7 +1749,13 @@ function openMesoWizard(opts, anchorEl) {
     go.style.marginTop = '14px';
     go.onclick = () => {
       if (!onboarding && !confirm('Replace your current programme and restart at week 1?\n\nLogged sessions and bodyweight history are kept.')) return;
-      S.days = draft.map(d => ({ name: d.name, slots: d.slots }));
+      // The layoff ramp belongs to this block, not forever: every lift in a
+      // freshly built block starts its own ramp counter from the answer given
+      // on this screen (or carried in Settings), independent of any ramp left
+      // over from before.
+      const rampN = layoffById(S.profile.layoff).rampSessions;
+      S.days = draft.map(d => ({ name: d.name, slots: d.slots.map(p =>
+        Object.assign({}, p, { rampLeft: rampN, earns: 0 })) }));
       S.setup = { days, minutes, weeks };
       S.profile.level = level; S.profile.goal = goal; S.profile.programId = programId;
       S.profile.onboarded = true;
@@ -2345,6 +2460,36 @@ views.settings = root => {
     lw.append(b);
   });
   c.append(lw);
+
+  const lo = el('div'); lo.style.margin = '0 0 12px';
+  lo.append(el('div','lbl','Returning from a break'));
+  lo.append(Object.assign(el('p','tiny'), { textContent:
+    'Separate from experience. Muscle comes back fast after time off; tendons lag behind it, which is how a comeback injury happens. A longer layoff here halves the load jump and asks for a second clear at the same weight before the next increase, for the first several sessions on each lift. This is standard, conservative coaching practice rather than a number from one specific study.' }));
+  LAYOFFS.forEach(LO => {
+    const b = el('button','sheetrow' + ((S.profile.layoff || 'short') === LO.id ? ' cur' : ''));
+    b.type = 'button';
+    const t = el('div');
+    t.append(el('div','sheetrow-n', LO.name));
+    t.append(el('div','sheetrow-m', LO.sub +
+      (LO.rampSessions ? ' \u00b7 first ' + LO.rampSessions + ' sessions per lift at half speed' : '')));
+    b.append(t);
+    b.onclick = () => { S.profile.layoff = LO.id; save(); render(); };
+    lo.append(b);
+  });
+  const applyRamp = el('button','btn sm block ghost','Apply this to your current plan now');
+  applyRamp.style.marginTop = '8px';
+  applyRamp.onclick = () => {
+    const rampN = layoffById(S.profile.layoff).rampSessions;
+    if (!rampN) { alert('Training now, or within the last 3 months, needs no ramp.'); return; }
+    if (!confirm('Ease every lift in your current plan back in for the next ' + rampN +
+                 ' sessions on each one?\n\nLoads and history are kept. Only the next few increases on each lift come slower.')) return;
+    S.days.forEach(d => d.slots.forEach(p => { p.rampLeft = rampN; p.earns = 0; }));
+    save(); alert('Done. Easing back in for the next ' + rampN + ' sessions on each lift.');
+  };
+  lo.append(applyRamp);
+  lo.append(Object.assign(el('p','tiny'), { textContent:
+    'Choosing an answer above only sets what a NEW mesocycle starts with. Use the button to apply it to the block you are already running, for example after an injury or a trip mid-block.' }));
+  c.append(lo);
 
   if (!profileComplete(S.profile)) {
     const warn = el('div','alert warn');

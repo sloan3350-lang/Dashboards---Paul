@@ -389,7 +389,18 @@ const EX3 = [
   { id:'deadbug',     slot:'core',   name:'Dead bug',                  inc:5,  equip:'bw',
     joints:{lowback:0,shoulder:0,hip:0}, cue:'Low back flat on the floor the whole time. Slow beats many.' },
   { id:'sideplank',   slot:'core',   name:'Side plank',                inc:5,  equip:'bw',
-    joints:{lowback:0,shoulder:1,hip:0}, cue:'Stack the shoulders and hips. Obliques.' }
+    joints:{lowback:0,shoulder:1,hip:0}, cue:'Stack the shoulders and hips. Obliques.' },
+
+  // ---- grip variants people specifically ask for, added after a request to
+  // cover ordinary gym equipment by named grip rather than only by movement ----
+  { id:'latpullcg',   slot:'vpull',  name:'Close-grip lat pulldown',   inc:10, equip:'machine',
+    joints:{shoulder:1,elbow:1,wrist:0}, cue:'V-bar or close parallel handle. More lat stretch at the top, more biceps through the pull than a wide grip.' },
+  { id:'latpullrev',  slot:'vpull',  name:'Underhand-grip lat pulldown', inc:10, equip:'machine',
+    joints:{shoulder:1,elbow:1,wrist:1}, cue:'Palms facing you. Shifts more of the work onto the lower lats and biceps; go lighter than the overhand version until you know how it feels.' },
+  { id:'benchwide',   slot:'hpress', name:'Wide-grip bench press',     inc:5,  equip:'bar',
+    joints:{shoulder:2,elbow:1,wrist:1}, cue:'Hands just outside shoulder width on the rings. Shorter range, more chest, harder on the front of the shoulder than a medium grip.' },
+  { id:'rowcg',       slot:'hpull',  name:'Close-grip seated cable row', inc:10, equip:'cable',
+    joints:{lowback:1,shoulder:1,elbow:1}, cue:'V-handle, elbows tracking close to the ribs. More mid-back, less rear delt than a wide grip.' }
 ];
 
 const SLOTS2 = [

@@ -85,6 +85,8 @@ section{display:flex;flex-direction:column;gap:13px}
       border:0;border-bottom:1px solid var(--line);padding:14px 10px;min-height:70px}
 .lift:last-child{border-bottom:0}
 .lift.done .lift-n{color:var(--muted)}
+.lift.skipped .lift-n{color:var(--muted);font-style:italic}
+.skipnote{color:var(--warn)}
 .lift-i{font-family:var(--serif);font-size:17px;font-weight:700;color:var(--accent);
         width:18px;flex:none;text-align:center;font-variant-numeric:tabular-nums}
 .lift.done .lift-i{color:var(--muted)}

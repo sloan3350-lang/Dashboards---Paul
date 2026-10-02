@@ -95,6 +95,8 @@ section{display:flex;flex-direction:column;gap:13px}
       border:0;border-bottom:1px solid var(--line);padding:14px 10px;min-height:70px}
 .lift:last-child{border-bottom:0}
 .lift.done .lift-n{color:var(--muted)}
+.lift.skipped .lift-n{color:var(--muted);font-style:italic}
+.skipnote{color:var(--warn)}
 .lift-i{font-family:var(--serif);font-size:17px;font-weight:700;color:var(--accent);
         width:18px;flex:none;text-align:center;font-variant-numeric:tabular-nums}
 .lift.done .lift-i{color:var(--muted)}
@@ -431,10 +433,6 @@ main{position:relative;z-index:1}
 
 /* The badge can never push the theme button off the header. */
 .wk{min-width:0;max-width:62vw;overflow:hidden;text-overflow:ellipsis}
-
-/* --- artifact build: the host document already carries the safe-area insets --- */
-.top{top:0;padding-top:12px}
-html,body{background:var(--bg)}
 </style>
 </head>
 <body>
@@ -486,6 +484,5 @@ html,body{background:var(--bg)}
 <script src="data.js"></script>
 <script src="engine.js"></script>
 <script src="app.js"></script>
-
 </body>
 </html>

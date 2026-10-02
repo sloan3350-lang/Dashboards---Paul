@@ -111,13 +111,13 @@ ok('lower-body jumps stay inside the NSCA 5 to 15 lb range',
 
 // A novice clears the bar a rep or two short of the top; an advanced lifter does not.
 const shortOfTop = [{ reps: 11, rir: 2, load: 100 }];
-const tgt2 = { repLow: 8, repHigh: 12, rir: 2, load: 100 };
+const tgtLevel = { repLow: 8, repHigh: 12, rir: 2, load: 100 };
 ok('a novice progresses on 11 of a 8 to 12 range at target effort',
-   E.nextLoad(shortOfTop, tgt2, bench2, 0, 'novice').load > 100);
+   E.nextLoad(shortOfTop, tgtLevel, bench2, 0, 'novice').load > 100);
 ok('an advanced lifter does not progress until the whole range is cleared',
-   E.nextLoad(shortOfTop, tgt2, bench2, 0, 'adv').load === 100);
+   E.nextLoad(shortOfTop, tgtLevel, bench2, 0, 'adv').load === 100);
 ok('everyone progresses once the top of the range is hit',
-   E.nextLoad([{ reps: 12, rir: 2, load: 100 }], tgt2, bench2, 0, 'adv').load > 100);
+   E.nextLoad([{ reps: 12, rir: 2, load: 100 }], tgtLevel, bench2, 0, 'adv').load > 100);
 
 const s30 = E.sessionShape({ minutes: 30, level: 'inter', goal: 'gain' });
 const s60 = E.sessionShape({ minutes: 60, level: 'inter', goal: 'gain' });
@@ -236,6 +236,25 @@ ok('every full body session still covers all six main patterns',
      .every(sl => d.slots.some(p => p.slot === sl))));
 ok('no session runs over the time budget',
    fb.every(d => d.minutes <= 60 + 4));
+
+/* ---------------- returning from a layoff ---------------- */
+const tgtRamp = { repLow: 8, repHigh: 12, rir: 2, load: 100 };
+const topSet = [{ reps: 12, rir: 2, load: 100 }];
+ok('a ramping lift clearing the top once does not jump load yet',
+   E.nextLoad(topSet, tgtRamp, bench2, 0, 'inter', { active: true, priorEarns: 0 }).load === 100);
+ok('a ramping lift clearing the top once asks for a repeat, and remembers it',
+   E.nextLoad(topSet, tgtRamp, bench2, 0, 'inter', { active: true, priorEarns: 0 }).earns === 1);
+ok('a second clear in a row while ramping finally progresses',
+   E.nextLoad(topSet, tgtRamp, bench2, 0, 'inter', { active: true, priorEarns: 1 }).load > 100);
+ok('a ramping jump is half the normal jump',
+   E.nextLoad(topSet, tgtRamp, bench2, 0, 'inter', { active: true, priorEarns: 1 }).load - 100
+     < E.nextLoad(topSet, tgtRamp, bench2, 0, 'inter', { active: false, priorEarns: 0 }).load - 100);
+ok('with no ramp passed at all, behaviour is unchanged from before this feature existed',
+   E.nextLoad(topSet, tgtRamp, bench2, 0, 'inter').load === E.nextLoad(topSet, tgtRamp, bench2, 0, 'inter', { active: false }).load);
+ok('four layoff answers, ordered from no ramp to the longest',
+   E.LAYOFFS.length === 4 && E.LAYOFFS[0].rampSessions === 0 && E.LAYOFFS[3].rampSessions > E.LAYOFFS[2].rampSessions);
+ok('an unknown layoff id falls back rather than throwing',
+   E.layoffById('nonsense').id === E.LAYOFFS[0].id);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
