@@ -119,13 +119,47 @@ ok('an advanced lifter does not progress until the whole range is cleared',
 ok('everyone progresses once the top of the range is hit',
    E.nextLoad([{ reps: 12, rir: 2, load: 100 }], tgtLevel, bench2, 0, 'adv').load > 100);
 
-const s30 = E.sessionShape({ minutes: 30, level: 'inter', goal: 'gain' });
-const s60 = E.sessionShape({ minutes: 60, level: 'inter', goal: 'gain' });
-const s90 = E.sessionShape({ minutes: 90, level: 'inter', goal: 'gain' });
-ok('a longer session buys more lifts', s30.slotCount < s60.slotCount && s60.slotCount <= s90.slotCount);
-ok('a longer session buys more sets on the main lifts', s30.setsPrimary < s90.setsPrimary);
-ok('cutting holds volume back rather than chasing it',
-   E.sessionShape({ minutes: 60, level: 'inter', goal: 'cut' }).setsPrimary < s60.setsPrimary);
+/* ---------------- weekly volume: research targets drive the build ---------------- */
+E.setSlots(D.SLOTS);
+ok('a gain target starts at the evidence floor of ten for a new lifter',
+   E.weeklyTarget('new', 'gain') === 10);
+ok('the gain target rises with training age',
+   E.weeklyTarget('novice','gain') > E.weeklyTarget('new','gain') &&
+   E.weeklyTarget('inter','gain') > E.weeklyTarget('novice','gain') &&
+   E.weeklyTarget('adv','gain') > E.weeklyTarget('inter','gain'));
+ok('a cut holds every level at ten', ['new','novice','inter','adv'].every(l => E.weeklyTarget(l, 'cut') === 10));
+const setsIn = pl => pl.reduce((t, d) => t + d.slots.reduce((u, p) => u + p.sets, 0), 0);
+ok('a longer session buys more weekly sets',
+   setsIn(E.buildProgram({ programId:'fullclassic', days:3, minutes:45, level:'inter', goal:'gain' }, D.EX, D.SUBS)) <
+   setsIn(E.buildProgram({ programId:'fullclassic', days:3, minutes:75, level:'inter', goal:'gain' }, D.EX, D.SUBS)));
+let thinLift = 0;
+['new','novice','inter','adv'].forEach(l => [2,3,4,5].forEach(d => [30,45,60,75,90].forEach(m =>
+  E.programsFor({ level: l, days: d, minutes: m }).forEach(pr =>
+    E.buildProgram({ programId: pr.id, days: d, minutes: m, level: l, goal: 'gain' }, D.EX, D.SUBS)
+      .forEach(day => day.slots.forEach(p => { if (E.blockSets(1, p.sets, 6) < 2) thinLift++; }))))));
+ok('no programme at any schedule prescribes a one-set lift outside the deload', thinLift === 0);
+['inter','adv'].forEach(l => {
+  const t = E.weeklyTarget(l, 'gain');
+  const best = E.programsFor({ level: l, days: 5, minutes: 75 })
+    .map(pr => E.programScore({ programId: pr.id, days: 5, minutes: 75, level: l, goal: 'gain' }, D.EX, D.SUBS, D.SLOTS))
+    .sort(E.rankPrograms)[0];
+  ok('five days at 75 minutes gets every major muscle to the ' + l + ' target of ' + t,
+     best.clears === E.MAJOR_MUSCLES.length);
+});
+const capInter = E.weekCapacity({ days: 3, minutes: 60, level: 'inter', goal: 'gain' });
+ok('a short schedule says how many minutes it would take', !capInter.canCoverAll && capInter.minutesNeeded > 60);
+ok('more days need fewer minutes per session',
+   E.weekCapacity({ days: 4, minutes: 60, level: 'inter', goal: 'gain' }).minutesNeeded < capInter.minutesNeeded);
+const twoDayUL = E.programScore({ programId:'ul', days:2, minutes:60, level:'inter', goal:'gain' }, D.EX, D.SUBS, D.SLOTS);
+const twoDayFB = E.programScore({ programId:'fullclassic', days:2, minutes:60, level:'inter', goal:'gain' }, D.EX, D.SUBS, D.SLOTS);
+ok('at two days a week, full body outranks a split that hits each muscle once', E.rankPrograms(twoDayFB, twoDayUL) < 0);
+const oldPlan = [{ name:'A', slots:[
+  { slot:'squat', exId:'beltsq', sets:1, load:135, uid:'a1' },
+  { slot:'hpress', exId:'machchest', sets:1, load:110, uid:'a2' }] }];
+E.reallocateSets(oldPlan, { minutes: 60, level: 'inter', goal: 'gain' }, D.EX, D.SUBS);
+ok('re-dosing an old plan lifts every set count to at least two', oldPlan[0].slots.every(p => p.sets >= 2));
+ok('re-dosing keeps the lifts, loads and ids that were already there',
+   oldPlan[0].slots[0].exId === 'beltsq' && oldPlan[0].slots[0].load === 135 && oldPlan[0].slots[1].uid === 'a2');
 
 let thin = 0;
 ['new','novice','inter','adv'].forEach(l => [2,3,4,5,6].forEach(d => [30,45,60,75].forEach(m => {
@@ -204,7 +238,8 @@ ok('an eight week block ramps monotonically', (() => {
   const r = [1,2,3,4,5,6,7].map(w => E.blockRir(w, 8));
   return r.every((v, i) => i === 0 || v <= r[i - 1]);
 })());
-ok('week one eases a set off the plan', E.blockSets(1, 3, 8) === 2);
+ok('week one carries the full planned sets; effort, not sets, eases it in', E.blockSets(1, 3, 8) === 3 && E.blockRir(1, 8) === 4);
+ok('no accumulation week drops a lift below two sets', E.blockSets(1, 1, 8) === 2 && E.blockSets(3, 2, 8) === 2);
 ok('the middle of the block carries the planned sets', E.blockSets(4, 3, 8) === 3);
 ok('the deload halves the sets', E.blockSets(8, 3, 8) === 1);
 ok('a deload never drops below one set', E.blockSets(8, 1, 8) === 1);
@@ -227,10 +262,11 @@ ok('capacity scales with days and minutes',
    E.weekCapacity(gain).weeklySets > E.weekCapacity(tight).weeklySets);
 
 const fb = E.buildProgram({ programId:'fullclassic', days:3, minutes:60, level:'inter', goal:'gain' }, D.EX, D.SUBS);
-ok('every full body session carries direct biceps work',
-   fb.every(d => d.slots.some(p => p.slot === 'biceps')));
-ok('every full body session carries direct triceps work',
-   fb.every(d => d.slots.some(p => p.slot === 'triceps')));
+const roomy = E.buildProgram({ programId:'fullclassic', days:5, minutes:75, level:'inter', goal:'gain' }, D.EX, D.SUBS);
+ok('when the week has room, every full body session carries direct biceps work',
+   roomy.every(d => d.slots.some(p => p.slot === 'biceps')));
+ok('when the week has room, every full body session carries direct triceps work',
+   roomy.every(d => d.slots.some(p => p.slot === 'triceps')));
 ok('every full body session still covers all six main patterns',
    fb.every(d => ['squat','hpress','vpull','hinge','hpull','vpress']
      .every(sl => d.slots.some(p => p.slot === sl))));

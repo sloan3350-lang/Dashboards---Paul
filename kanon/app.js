@@ -13,7 +13,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>'
 function seed() {
   // `primary` marks the compound slots that carry the extra week-2 set. It is a
   // property of the slot, not of its position, so reordering cannot move volume.
-  const mk = (slot, exId, primary) => ({ slot, exId, sets: 1, repLow: 8, repHigh: 12,
+  const mk = (slot, exId, primary) => ({ slot, exId, sets: 2, repLow: 8, repHigh: 12,
                                          load: null, misses: 0, primary: !!primary });
   return {
     profile: { sex:'male', age:44, heightIn:70, goal:'cut', appetiteSuppressed:true, theme:'dark', figure:'male',
@@ -165,10 +165,39 @@ const blockWeeks = () => (S.setup && S.setup.weeks) || 5;
  * has to REPLACE the planned number, not be maxed against it, or the deload
  * never actually deloads. */
 const setsThisWeek = (week, p) => blockSets(week, p.sets || 1, blockWeeks());
-function setsForWeek(week, isPrimary) {      // kept for the volume preview
-  return blockSets(week, isPrimary ? 2 : 1, blockWeeks());
-}
 const rirForWeek = w => blockRir(w, blockWeeks());
+
+/* What it would take to reach the weekly target, as day-by-minute options. */
+function capacityOptions(level, goal) {
+  return [2, 3, 4, 5, 6].map(d => d + ' days \u00d7 ' +
+    weekCapacity({ days: d, minutes: 60, level, goal }).minutesNeeded + ' min').join(', ');
+}
+
+/* Re-dose the running block against the weekly target for the current level
+   and goal. Every lift, load, ramp counter and logged set stays as it is; only
+   the planned set counts change. */
+function redoseBlock(reason) {
+  if (!S.days || !S.days.length) return;
+  const count = d => d.slots.reduce((t, p) => t + (p.sets || 1), 0);
+  const before = S.days.map(count);
+  const minutes = (S.setup && S.setup.minutes) || 50;
+  reallocateSets(S.days, { minutes, level: S.profile.level, goal: S.profile.goal }, EX, SUBS);
+  ensureUids();
+  S.volVersion = 2;
+  const target = weeklyTarget(S.profile.level, S.profile.goal);
+  const vol = muscleVolume(S.days, SLOTS);
+  const short = MAJOR_MUSCLES.filter(m => (vol[m] || 0) < target);
+  const lines = [reason];
+  S.days.forEach((d, i) => lines.push(d.name + ': ' + before[i] + ' working sets before, ' + count(d) + ' now.'));
+  lines.push(short.length
+    ? (MAJOR_MUSCLES.length - short.length) + ' of ' + MAJOR_MUSCLES.length + ' major muscles reach ' + target +
+      ' sets a week at ' + S.days.length + ' days \u00d7 ' + minutes + ' minutes. Short: ' +
+      short.map(m => MUSCLE_NAME[m] + ' ' + (vol[m] || 0)).join(', ') +
+      '. Reaching ' + target + ' everywhere takes about ' + capacityOptions(S.profile.level, S.profile.goal) + '.'
+    : 'Every major muscle now reaches ' + target + ' hard sets a week.');
+  S.lastSummary = { date: today(), name: 'Volume rebuilt', week: S.week, lines,
+                    heading: 'Your set counts were rebuilt' };
+}
 const deloadWeekNow = w => isDeload(w, blockWeeks());
 
 function deloadSignals() {
@@ -385,7 +414,7 @@ views.train = root => {
   if (S.lastSummary && S.lastSummary.lines && S.lastSummary.lines.length) {
     const sum = el('div','card summary');
     const sh = el('div','row');
-    sh.append(Object.assign(el('h2'), { textContent: 'What the last session changed' }));
+    sh.append(Object.assign(el('h2'), { textContent: S.lastSummary.heading || 'What the last session changed' }));
     sh.append(el('div','spacer'));
     const dis = el('button','btn sm ghost','Dismiss');
     dis.onclick = () => { S.lastSummary = null; save(); render(); };
@@ -1311,14 +1340,12 @@ function openMesoWizard(opts, anchorEl) {
   function matches() {
     const m = programsFor({ level, days, minutes });
     const list = m.length ? m : PROGRAMS.filter(p => p.levels.includes(level));
-    // You said build muscle. The ones that actually get the most muscles to ten
-    // hard sets a week, at the days and minutes you have, go to the top.
+    // Ranked by how close each programme gets every major muscle to your
+    // weekly target at the days and minutes you have, weakest muscle second.
     return list.map(pr => {
       const sc = programScore({ programId: pr.id, days, minutes, level, goal, weeks }, EX, SUBS, SLOTS);
-      return { pr, clears: sc.clears, total: sc.total, lowest: sc.lowest };
-    }).sort((a, b) => goal === 'gain'
-      ? (b.clears - a.clears) || (b.lowest - a.lowest)
-      : 0);
+      return { pr, clears: sc.clears, total: sc.total, lowest: sc.lowest, coverage: sc.coverage, twice: sc.twice, target: sc.target };
+    }).sort(rankPrograms);
   }
 
   function header(kicker, title) {
@@ -1465,7 +1492,7 @@ function openMesoWizard(opts, anchorEl) {
       b.type = 'button';
       const t = el('div');
       t.append(el('div','sheetrow-n', L.name));
-      t.append(el('div','sheetrow-m', L.sub + ' · starts at ' + L.weekLow + ' to ' + L.weekHigh + ' sets per muscle per week'));
+      t.append(el('div','sheetrow-m', L.sub + ' · targets ' + L.weekTarget + ' sets per muscle per week'));
       b.append(t);
       b.onclick = () => { level = L.id; S.profile.level = L.id; save(); clearPicks(); draw(); };
       inner.append(b);
@@ -1541,18 +1568,17 @@ function openMesoWizard(opts, anchorEl) {
     const cap = weekCapacity({ days, minutes, level, goal });
     const best = matches().reduce((hi, m) => Math.max(hi, m.clears), 0);
     const total = MAJOR_MUSCLES.length;
-    const box = el('div','alert ' + (goal !== 'gain' ? 'good' : best >= total ? 'good' : best >= total / 2 ? 'warn' : 'bad'));
-    let txt = '<b>' + days + ' days at ' + minutes + ' minutes is ' + cap.weeklySets + ' working sets a week</b>';
-    if (goal !== 'gain') {
-      txt += 'Enough to hold what you have and push the priorities.';
-    } else if (best >= total) {
-      txt += 'Enough to get all ' + total + ' major muscles to ten hard sets a week. Any of the top programmes will build across the board.';
+    const box = el('div','alert ' + (best >= total ? 'good' : best >= total / 2 ? 'warn' : 'bad'));
+    let txt = '<b>Your target: ' + cap.target + ' hard sets per muscle per week</b>' +
+      (goal === 'gain'
+        ? 'Set by your experience level. The research floor for growth is about 10; trained lifters do best in the 12 to 20 range. '
+        : 'Ten holds muscle while recovery is limited. ');
+    if (best >= total) {
+      txt += days + ' days at ' + minutes + ' minutes reaches it on all ' + total + ' major muscles.';
     } else {
-      txt += 'The best programme available at this schedule gets ' + best + ' of ' + total +
-             ' major muscles to ten hard sets a week. The rest hold at maintenance. ' +
-             'Add a day, or fifteen minutes, to close the gap.';
-    }
-    box.innerHTML = txt;
+      txt += days + ' days at ' + minutes + ' minutes reaches it on ' + best + ' of ' + total +
+             '. Reaching it everywhere takes about ' + capacityOptions(level, goal) + '.';
+    }    box.innerHTML = txt;
     inner.append(box);
 
     nav(onboarding ? 0 : null, 2, 'See programmes');
@@ -1563,10 +1589,11 @@ function openMesoWizard(opts, anchorEl) {
     const list = matches();
     header(list.length + ' programmes fit', 'Pick a programme');
     inner.append(Object.assign(el('p','hint'), { textContent: goal === 'gain'
-      ? 'Ranked by how many of the nine major muscles reach ten hard sets a week at ' + days +
-        ' days and ' + minutes + ' minutes. The lifts inside any of them are swappable afterwards.'
-      : 'Filtered to ' + levelById(level).name.toLowerCase() + ', ' + days + ' days a week, ' + minutes +
-        ' minute sessions. The lifts inside any of them are swappable afterwards.' }));
+      ? 'Ranked by how many major muscles get trained at least twice a week, then by how close all nine get to ' +
+        weeklyTarget(level, goal) + ' hard sets a week at ' + days + ' days and ' + minutes +
+        ' minutes. The number is how many reach it. Lifts are swappable afterwards.'
+      : 'Ranked the same way against a target of ' + weeklyTarget(level, goal) + ' sets a week, at ' + days +
+        ' days and ' + minutes + ' minutes. Lifts are swappable afterwards.' }));
     if (!list.find(x => x.pr.id === programId)) programId = list[0].pr.id;
 
     list.forEach(({ pr, clears, total }) => {
@@ -1575,7 +1602,7 @@ function openMesoWizard(opts, anchorEl) {
       const t = el('div');
       const n = el('div','sheetrow-n');
       n.append(document.createTextNode(pr.name));
-      if (goal === 'gain') {
+      {
         const tag = el('span','scoretag' + (clears >= total ? ' full' : clears >= total / 2 ? ' ok' : ''));
         tag.textContent = clears + '/' + total;
         n.append(tag);
@@ -1682,39 +1709,33 @@ function openMesoWizard(opts, anchorEl) {
 
     const vol = muscleVolume(draft, SLOTS);
     const L = levelById(level);
+    const target = weeklyTarget(level, goal);
     inner.append(el('div','eyebrow','Hard sets per muscle, per week'));
     inner.append(Object.assign(el('div','qs'), { textContent:
-      'Counted fractionally: a press is a full set for the chest, half for the triceps and front delts. Your band at ' +
-      L.name.toLowerCase() + ' is ' + L.weekLow + ' to ' + L.weekHigh +
-      '. Ten a week is the floor the research supports for growth; below that maintains rather than builds.' }));
+      'Counted fractionally, the method that best predicted results in the largest dose-response analysis to date (Pelland 2026): a press is a full set for the chest and half a set for the triceps. Your target is ' +
+      target + (goal === 'gain' ? ' at ' + L.name.toLowerCase() : ' while cutting') +
+      '. About 10 a week is the floor for growth; trained lifters do best between 12 and 20.' }));
     const vg = el('div','volgrid');
     const rank = m => (MAJOR_MUSCLES.indexOf(m) < 0 ? 1 : 0);
     Object.entries(vol)
       .sort((a, b) => rank(a[0]) - rank(b[0]) || b[1] - a[1])
       .forEach(([m, n]) => {
         const major = MAJOR_MUSCLES.indexOf(m) >= 0;
-        const cell = el('div','volcell' + (!major ? ' minor' : n >= 10 ? ' good' : n >= 6 ? ' ok' : ' low'));
+        const cell = el('div','volcell' + (!major ? ' minor' : n >= target ? ' good' : n >= 10 ? ' ok' : ' low'));
         cell.append(Object.assign(el('span','volnum'), { textContent: String(n) }));
         cell.append(Object.assign(el('span','vollbl'), { textContent: MUSCLE_NAME[m] || m }));
         vg.append(cell);
       });
     inner.append(vg);
-    // Ten a week is the evidence floor and the pass mark. The level band is
-    // shown as context, because holding a two-day programme to an advanced
-    // lifter's twenty would flag everything and teach you to ignore the flag.
-    const under = Object.entries(vol)
-      .filter(([m, n]) => MAJOR_MUSCLES.indexOf(m) >= 0 && n < 10).length;
-    const verdict = el('div','alert ' + (under === 0 ? 'good' : under <= 3 ? 'warn' : 'bad'));
-    verdict.innerHTML = under === 0
-      ? '<b>Every major muscle clears ten sets a week</b>This builds across the board. Your band at ' +
-        L.name.toLowerCase() + ' runs to ' + L.weekHigh + ', so there is room to add if a lift stalls.'
-      : '<b>' + (MAJOR_MUSCLES.length - under) + ' of ' + MAJOR_MUSCLES.length +
-        ' major muscles clear ten sets a week</b>The rest hold at maintenance. ' +
-        (days <= 2
-          ? 'Two days a week buys the sets for that and no more.'
-          : minutes <= 35
-          ? 'Thirty minute sessions buy about seven working sets each. There is no arrangement of seven that reaches ten everywhere.'
-          : 'A day or fifteen minutes more closes most of the gap.');
+    const short = MAJOR_MUSCLES.filter(m => (vol[m] || 0) < target);
+    const verdict = el('div','alert ' + (short.length === 0 ? 'good' : short.length <= 3 ? 'warn' : 'bad'));
+    verdict.innerHTML = short.length === 0
+      ? '<b>Every major muscle reaches ' + target + ' hard sets a week</b>Each lift carries at least two working sets, and every week but the deload carries the full count. Volume only rises from here if a lift stalls while you are recovering well.'
+      : '<b>' + (MAJOR_MUSCLES.length - short.length) + ' of ' + MAJOR_MUSCLES.length +
+        ' major muscles reach ' + target + ' sets a week</b>Short: ' +
+        short.map(m => MUSCLE_NAME[m] + ' at ' + (vol[m] || 0)).join(', ') +
+        '. There are not enough minutes at ' + days + ' days \u00d7 ' + minutes +
+        ' to dose everything. Reaching ' + target + ' everywhere takes about ' + capacityOptions(level, goal) + '.';
     inner.append(verdict);
 
     inner.append(el('div','eyebrow','The sessions'));
@@ -1760,6 +1781,7 @@ function openMesoWizard(opts, anchorEl) {
       S.profile.level = level; S.profile.goal = goal; S.profile.programId = programId;
       S.profile.onboarded = true;
       S.week = 1; S.cur = 0; S.draft = null; S.preview = null; S.lastSummary = null; S.undo = null;
+      S.volVersion = 2;
       save(); closeSheet(); current = 'train'; render();
     };
     const back = el('button','btn block ghost','Back');
@@ -2416,7 +2438,11 @@ views.settings = root => {
     const o = el('option', null, t); o.value = v;
     if (S.profile.goal === v) o.selected = true; sel.append(o);
   });
-  sel.onchange = () => { S.profile.goal = sel.value; save(); render(); };
+  sel.onchange = () => {
+    S.profile.goal = sel.value;
+    redoseBlock('Goal changed, so the weekly target changed with it. Set counts were rebuilt; lifts and loads are unchanged.');
+    save(); render();
+  };
   gw.append(sel); c.append(gw);
 
   const fw = el('div'); fw.style.margin = '0 0 14px';
@@ -2448,15 +2474,21 @@ views.settings = root => {
   const lw = el('div'); lw.style.margin = '0 0 12px';
   lw.append(el('div','lbl','Lifting experience'));
   lw.append(Object.assign(el('p','tiny'), { textContent:
-    'Sets your weekly volume band and how hard a load increase is to earn. Novices add weight most sessions. Advanced lifters earn it over weeks.' }));
+    'Sets your weekly target in hard sets per muscle and how hard a load increase is to earn. Changing it rebuilds the set counts in the block you are running. Novices add weight most sessions. Advanced lifters earn it over weeks.' }));
   LEVELS.forEach(L => {
     const b = el('button','sheetrow' + (S.profile.level === L.id ? ' cur' : ''));
     b.type = 'button';
     const t = el('div');
     t.append(el('div','sheetrow-n', L.name));
-    t.append(el('div','sheetrow-m', L.sub + ' \u00b7 ' + L.weekLow + '\u2013' + L.weekHigh + ' sets per muscle per week'));
+    t.append(el('div','sheetrow-m', L.sub + ' \u00b7 targets ' + L.weekTarget + ' sets per muscle per week'));
     b.append(t);
-    b.onclick = () => { S.profile.level = L.id; save(); render(); };
+    b.onclick = () => {
+      if (S.profile.level === L.id) return;
+      S.profile.level = L.id;
+      redoseBlock('Experience level changed to ' + L.name.toLowerCase() + ', so the weekly target is now ' +
+        L.weekTarget + ' sets. Set counts were rebuilt; lifts and loads are unchanged.');
+      save(); render();
+    };
     lw.append(b);
   });
   c.append(lw);
@@ -2521,7 +2553,7 @@ views.settings = root => {
   nm.onclick = () => openMesoWizard(null, nm);
   w.append(nm);
   w.append(Object.assign(el('p','tiny'), { textContent:
-    'Twenty-four programmes, ranked by how many muscles they get to ten hard sets a week at your schedule. Currently running ' +
+    'Twenty-four programmes, ranked by how close they get every major muscle to your weekly target at your schedule. Currently running ' +
     programById(S.profile.programId).name + ', ' +
     ((S.setup && S.setup.days) || S.days.length) + ' days a week at about ' +
     ((S.setup && S.setup.minutes) || 50) + ' minutes, in a ' + blockWeeks() + ' week block.' }));
@@ -2566,6 +2598,11 @@ views.settings = root => {
 
 /* ---------------- boot ---------------- */
 setSlots(SLOTS);          // the engine needs the muscle map for its volume pass
+// Blocks built before volume was target-driven carried one-set lifts. Re-dose
+// them once, in place, keeping every lift and load.
+if (S.profile.onboarded && S.volVersion !== 2) {
+  redoseBlock('Set counts in this block were rebuilt. Each major muscle is now dosed toward a weekly target from the published research, and no lift gets fewer than two working sets outside the deload.');
+}
 registerCustom();
 save();            // persist the seed so first-run state is durable
 applyTheme();

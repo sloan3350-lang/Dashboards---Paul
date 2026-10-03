@@ -25,15 +25,20 @@ function blockRir(week, blockWeeks) {
 
 function isDeload(week, blockWeeks) { return week >= (blockWeeks || DELOAD_WEEK); }
 
-/* Sets per slot for a given week. Week 1 eases in, the deload halves, and the
- * middle of the block carries the planned volume. */
+/* Sets per lift for a given week. Every accumulation week carries the full
+ * planned sets; week 1 is eased by effort (4 reps in reserve), not by cutting
+ * sets, because cutting a 2-set lift to 1 drops every muscle below the weekly
+ * floor. Only the deload halves. */
 function blockSets(week, planned, blockWeeks) {
   const n = blockWeeks || DELOAD_WEEK;
   if (isDeload(week, n)) return Math.max(1, Math.floor(planned / 2));
-  if (week === 1) return Math.max(1, planned - 1);
-  return planned;
+  return Math.max(SET_FLOOR, planned);
 }
 const SETS_CAP_PER_SLOT = 4;
+/* Hammarström et al., J Physiol 2020 (PMID 31813190): untrained people gained
+ * more muscle and strength from 3 sets per exercise than from 1. Two is the
+ * floor here so a short session can still cover every pattern. */
+const SET_FLOOR = 2;
 
 /* ---------- per-exercise load progression ---------- */
 // sets: [{reps, rir, load}], target: {repLow, repHigh, rir, load}
@@ -315,38 +320,56 @@ function weeklyVolume(sessions, week, setsForWeekFn) {
 
 /* ============================================================
    TRAINING AGE, TIME BUDGET, PROGRAM LIBRARY, JOINT POLICY, UNITS
-   Added after day one. Sources for the numbers, so they can be argued with:
+   Every number below is traced to a source so it can be argued with.
 
-   Weekly sets per muscle. Schoenfeld 2017 meta-analysis found 10+ sets a week
-   beats fewer. The 2022 systematic review in the Journal of Human Kinetics put
-   the practical band at 12 to 20 for trained men. Stronger By Science's reading
-   of the Pelland meta-regression is that growth keeps climbing past 20 with
-   sharply diminishing returns, and that ~10 is a good floor if you do not want
-   to live in the gym. Beginners sit at the bottom of the band.
+   Weekly sets per muscle (the variable that drives the whole build).
+   - Schoenfeld, Ogborn & Krieger, J Sports Sci 2017 (PMID 27433992): each
+     extra weekly set added ~0.37% growth; 10+ sets a week beat fewer.
+   - Baz-Valle et al., J Hum Kinet 2022 (PMID 35291645): 12 to 20 weekly sets
+     as the standard recommendation for trained men.
+   - Pelland et al., Sports Med 2026 (PMID 41343037): 67 studies, 2,058
+     people. Growth keeps rising with weekly sets, with diminishing returns;
+     strength flattens much sooner. Counting indirect sets as half a set
+     ("fractional") predicted results best, which is how muscleVolume counts.
+   - ACSM Position Stand, Med Sci Sports Exerc 2026 (doi 10.1249/MSS.
+     0000000000003897): ~10 sets per muscle per week for hypertrophy, every
+     major muscle at least twice a week; failure training and periodization
+     model did not consistently change outcomes.
+   So the weekly target starts at 10 for a new lifter and rises with training
+   age toward the middle of the 12-20 band. It is a target the builder fills
+   to, not a number reported after the fact.
 
-   Load increments. NSCA guidance as summarised in public training material:
-   smaller or less trained lifters add 2.5 to 5 lb upper body and 5 to 10 lb
-   lower body; larger or more experienced lifters add 5 to 10 upper and 10 to 15
-   lower.
+   Sets per exercise. Hammarström et al., J Physiol 2020 (PMID 31813190): even
+   untrained lifters gained more from 3 sets than 1. Floor of 2, cap of 4;
+   past 4 the next set goes on a second exercise for the same muscle. The cap
+   is a coaching convention, not a trial result.
 
-   Progression frequency. Novices can add load or reps almost every session.
-   Intermediates progress every one to three weeks. Advanced lifters every three
-   to eight weeks. So the engine does not change the size of the jump much by
-   level, it changes how hard the jump is to earn.
+   Load and progression. ACSM 2009 Position Stand (Med Sci Sports Exerc
+   41:687-708): 8-12 RM for novices; add 2-10% load once the lifter can do
+   one to two reps over the target. That is double progression, which is what
+   nextLoad does. Plotkin et al., PeerJ 2022 (PMID 36199287): adding reps at
+   a fixed load grew muscle as well as adding load, so reps climb first and
+   load is the reward for clearing the top of the range.
 
-   Reps and load. 8 to 12 reps at 60 to 80% of 1RM is the band that shows up
-   repeatedly for hypertrophy. Isolation work tolerates 10 to 20.
+   Effort. Robinson et al., Sports Med 2024 (PMID 38970765): growth improves
+   as sets end closer to failure; strength barely cares. Refalo et al., J
+   Sports Sci 2024 (PMID 38393985): 1-2 reps in reserve grew muscle as well as
+   failure. Hence a 4 to 1 RIR ramp, never prescribed failure.
+
+   Rest and time. Schoenfeld et al., J Strength Cond Res 2016 (PMID 26605807):
+   3-minute rests beat 1-minute rests for growth in trained men. A compound
+   set plus its rest is costed at 3 minutes, an isolation set at 2.
    ============================================================ */
 
 const LEVELS = [
   { id:'new',   name:'New to lifting',  sub:'Under 6 months, or coming back after years off',
-    weekLow:8,  weekHigh:12, incScale:0.5, earnTop:2, deloadEvery:5, startRir:4 },
+    weekLow:10, weekHigh:12, weekTarget:10, incScale:0.5, earnTop:2, deloadEvery:5, startRir:4 },
   { id:'novice',name:'Novice',          sub:'6 months to a year of consistent training',
-    weekLow:10, weekHigh:15, incScale:0.75, earnTop:1, deloadEvery:5, startRir:3 },
+    weekLow:10, weekHigh:14, weekTarget:12, incScale:0.75, earnTop:1, deloadEvery:5, startRir:3 },
   { id:'inter', name:'Intermediate',    sub:'One to four years, lifts move month to month',
-    weekLow:12, weekHigh:18, incScale:1, earnTop:0, deloadEvery:5, startRir:3 },
+    weekLow:12, weekHigh:18, weekTarget:14, incScale:1, earnTop:0, deloadEvery:5, startRir:3 },
   { id:'adv',   name:'Advanced',        sub:'Four years or more, progress is slow and earned',
-    weekLow:16, weekHigh:22, incScale:1, earnTop:0, deloadEvery:4, startRir:2 }
+    weekLow:14, weekHigh:20, weekTarget:16, incScale:1, earnTop:0, deloadEvery:4, startRir:2 }
 ];
 const levelById = id => LEVELS.find(l => l.id === id) || LEVELS[2];
 
@@ -363,31 +386,25 @@ function loadStep(ex, levelId) {
   return Math.min(hi, Math.max(lo, roundTo(raw, 2.5)));
 }
 
-/* How much work fits in the time you actually have. A compound working set
-   costs about 3.5 minutes with its rest, an isolation set about 2.2. Warm-up is
-   a fixed charge. This is what makes the minutes field change sets and reps
-   rather than only the number of exercises. */
-const MIN_PER_SET = slot => (ISO_SLOTS.concat(['biceps','triceps']).includes(slot) ? 2.2 : 3.5);
+/* Minutes per working set including its rest (see the rest note above), plus
+   a fixed warm-up charge per session. */
+const MIN_PER_SET = slot => (ISO_SLOTS.concat(['biceps','triceps']).includes(slot) ? 2 : 3);
+
+/* The weekly fractional-set target every major muscle is built toward. A cut
+   holds at the evidence floor of 10: a deficit is short on recovery, and the
+   aim is to keep muscle, not to chase peak volume. */
+function weeklyTarget(level, goal) {
+  return goal === 'gain' ? levelById(level).weekTarget : 10;
+}
 
 function sessionShape({ minutes, level, goal }) {
   const L = levelById(level);
   const budget = Math.max(10, (minutes || 50) - WARMUP_MIN);
-  const setBudget = Math.floor(budget / 3.0);          // mixed compound/isolation average
-  // Short sessions keep volume by stacking sets on fewer lifts; long sessions
-  // spend it on more lifts. Both land inside the weekly band once multiplied by
-  // training days.
-  let slotCount, setsPrimary, setsOther;
-  if (setBudget <= 8)       { slotCount = 4; setsPrimary = 2; setsOther = 1; }
-  else if (setBudget <= 12) { slotCount = 5; setsPrimary = 2; setsOther = 2; }
-  else if (setBudget <= 17) { slotCount = 7; setsPrimary = 3; setsOther = 2; }
-  else if (setBudget <= 22) { slotCount = 9; setsPrimary = 3; setsOther = 2; }
-  else                      { slotCount = 9; setsPrimary = 4; setsOther = 3; }
-  if (L.id === 'new') { setsPrimary = Math.min(setsPrimary, 2); setsOther = Math.min(setsOther, 2); }
-  // Cutting is not the time to chase peak volume; maintain it and keep the load.
-  if (goal === 'cut') setsPrimary = Math.max(2, setsPrimary - 1);
-  return { slotCount, setsPrimary, setsOther, setBudget,
+  return { setBudget: Math.floor(budget / 2.8), budgetMin: budget,
+           setsPrimary: 3, setsOther: SET_FLOOR,
            repLow: 8, repHigh: 12, isoLow: 10, isoHigh: 15,
-           rir: L.startRir, weekLow: L.weekLow, weekHigh: L.weekHigh };
+           rir: L.startRir, weekLow: L.weekLow, weekHigh: L.weekHigh,
+           weekTarget: weeklyTarget(level, goal) };
 }
 
 /* ---------------- program library ----------------
@@ -507,32 +524,48 @@ function programsFor({ level, days, minutes }) {
 
 function programById(id) { return PROGRAMS.find(p => p.id === id) || PROGRAMS[1]; }
 
-/* How well a programme actually delivers on the goal, given the days and minutes
- * available. Used to rank the library: if you said build muscle, the programmes
- * that get the most muscles to ten hard sets a week come first. */
+/* How well a programme delivers on the goal at this schedule. Ranked by how
+ * many major muscles are trained at least twice a week, then coverage, then
+ * the weakest muscle. */
+function rankPrograms(a, b) { return (b.twice - a.twice) || (b.coverage - a.coverage) || (b.lowest - a.lowest) || (b.clears - a.clears); }
 function programScore(opts, EX, SUBS, SLOTS) {
+  const target = weeklyTarget(opts.level, opts.goal);
   try {
     const plan = buildProgram(opts, EX, SUBS);
     const v = muscleVolume(plan, SLOTS);
-    const clears = MAJOR_MUSCLES.filter(m => (v[m] || 0) >= 10).length;
+    const clears = MAJOR_MUSCLES.filter(m => (v[m] || 0) >= target).length;
+    const floor = MAJOR_MUSCLES.filter(m => (v[m] || 0) >= 10).length;
     const lowest = MAJOR_MUSCLES.reduce((lo, m) => Math.min(lo, v[m] || 0), 99);
-    return { clears, total: MAJOR_MUSCLES.length, lowest, volume: v, plan };
+    // Coverage: each muscle's sets toward the target, capped at the target
+    // and square-rooted. The root encodes diminishing returns per extra set
+    // (Pelland 2026), so four sets on every muscle outranks ten on the legs
+    // and two on everything else.
+    const coverage = MAJOR_MUSCLES.reduce((t, m) => t + Math.sqrt(Math.min(target, v[m] || 0)), 0);
+    // Twice a week: ACSM 2026 recommends every major muscle at least two
+    // days a week, and Pelland 2026 found strength rises with frequency. A
+    // muscle counts as trained on a day once it gets a full set's credit.
+    const twice = MAJOR_MUSCLES.filter(m =>
+      plan.filter(d => (muscleVolume([d], SLOTS)[m] || 0) >= 1).length >= Math.min(2, plan.length)).length;
+    return { clears, floor, target, coverage, twice, total: MAJOR_MUSCLES.length, lowest, volume: v, plan };
   } catch (e) {
-    return { clears: 0, total: MAJOR_MUSCLES.length, lowest: 0, volume: {}, plan: [] };
+    return { clears: 0, floor: 0, target, coverage: 0, twice: 0, total: MAJOR_MUSCLES.length, lowest: 0, volume: {}, plan: [] };
   }
 }
 
-/* What a week of this length and frequency can support at all, regardless of
- * which programme is chosen. Answering this before the programme is picked is
- * the difference between steering and scolding. */
+/* What a schedule can support at all, before a programme is picked. The
+ * cheapest way to put T fractional sets on all nine major muscles is T direct
+ * sets on each of the six main patterns: glutes, biceps and triceps each pick
+ * up two half-credits from them. So 6 x T compound sets is the floor of the
+ * bill, and the minutes and days needed fall out of that. */
 function weekCapacity({ days, minutes, level, goal }) {
-  const shape = sessionShape({ minutes, level, goal });
-  const weeklySets = shape.setBudget * days;
-  // Nine major muscles at ten fractional sets is the full-coverage bill. Compound
-  // lifts pay part of it twice, so the practical figure is about 0.7 of that.
-  const needed = Math.round(MAJOR_MUSCLES.length * 10 * 0.7);
-  return { weeklySets, needed, canCoverAll: weeklySets >= needed,
-           coverable: Math.max(1, Math.floor(weeklySets / 7)) };
+  const target = weeklyTarget(level, goal);
+  const budget = Math.max(10, (minutes || 50) - WARMUP_MIN);
+  const perSet = MIN_PER_SET('squat');
+  const neededMin = 6 * target * perSet;
+  return { target, weeklySets: Math.floor(budget * days / perSet), needed: 6 * target,
+           canCoverAll: budget * days >= neededMin,
+           minutesNeeded: Math.ceil((neededMin / days + WARMUP_MIN) / 5) * 5,
+           daysNeeded: Math.ceil(neededMin / budget) };
 }
 
 function equipFilter(mode) {
@@ -541,57 +574,82 @@ function equipFilter(mode) {
   return () => true;
 }
 
-/* Build a concrete plan.
+/* Build a concrete plan in two passes.
  *
- * The session is filled against a TIME budget, not a fixed number of lifts, and
- * the aim is coverage: on a full-body programme every muscle group gets touched
- * if the clock allows, and what drops first is the accessory work, not the arms.
- * Picking "build muscle" then means what it says — leftover minutes are spent
- * lifting the muscles that are furthest below ten hard sets a week, rather than
- * being left on the table and reported back as a shortfall. */
-function buildProgram({ programId, days, minutes, level, goal, weeks }, EX, SUBS) {
+ * Pass 1 is coverage: every lift the day's template calls for, in priority
+ * order, at the two-set floor, until the session's minutes run out. What drops
+ * first on a short session is the accessory work at the end of the list.
+ *
+ * Pass 2 is dose: sets go wherever the weekly shortfall against the target is
+ * largest, scored by useful fractional sets per minute, until every major
+ * muscle reaches the target or there is no time left. Ties go to the lift
+ * with fewer sets, which spreads a muscle across more days of the week. If no
+ * existing lift can take another set, a lift for the short muscle is added on
+ * the day with the most time left. */
+function buildProgram({ programId, days, minutes, level, goal }, EX, SUBS) {
   const pr = programById(programId);
-  const shape = sessionShape({ minutes, level, goal });
   const ok = equipFilter(pr.equip);
   const layout = SPLITS[pr.split](days);
+  const budget = Math.max(10, (minutes || 50) - WARMUP_MIN);
+  const shape = sessionShape({ minutes, level, goal });
   const used = new Set();
-  const budget = shape.setBudget;
-  // Full body spends its time on breadth: every pattern, fewer sets each.
-  // A split already trains each muscle twice a week, so it can afford depth.
-  const breadth = pr.split === 'full';
+  const pool = slot => (SUBS[slot] || []).map(id => EX.find(e => e.id === id)).filter(e => e && ok(e));
+  const make = (slot, ex, primary) => {
+    const iso = MIN_PER_SET(slot) < 3;
+    return { slot, exId: ex.id, sets: SET_FLOOR,
+             repLow: iso ? shape.isoLow : shape.repLow, repHigh: iso ? shape.isoHigh : shape.repHigh,
+             load: null, misses: 0, primary };
+  };
 
+  const lay = (slots, slot, primary) => {
+    const options = pool(slot);
+    const ex = options.find(e => !used.has(e.id)) || options[0];
+    if (!ex) return;
+    used.add(ex.id);
+    slots.push(make(slot, ex, primary));
+  };
+  const spentOf = slots => slots.reduce((t, p) => t + p.sets * MIN_PER_SET(p.slot), 0);
+
+  // Pass 1: each main pattern the day calls for once, then the programme's
+  // own emphasis, at the set floor, while minutes last.
   const built = layout.map(day => {
-    const wanted = dedupe(day.slots.concat(pr.emphasis));
-    let spent = 0;
     const slots = [];
-    wanted.forEach((slot, i) => {
-      const pool = (SUBS[slot] || []).map(id => EX.find(e => e.id === id)).filter(e => e && ok(e));
-      const ex = pool.find(e => !used.has(e.id)) || pool[0];
-      if (!ex) return;
-      const iso = MIN_PER_SET(slot) < 3;
-      const primary = !breadth && i < 3 && !iso;
-      const n = breadth ? Math.max(2, shape.setsOther)
-                        : (primary ? shape.setsPrimary : shape.setsOther);
-      const cost = n * MIN_PER_SET(slot);
-      if (spent + cost > budget * 3.0 && slots.length >= 3) return;   // out of time
-      used.add(ex.id);
-      slots.push({ slot, exId: ex.id, sets: n,
-                   repLow:  iso ? shape.isoLow  : shape.repLow,
-                   repHigh: iso ? shape.isoHigh : shape.repHigh,
-                   load: null, misses: 0, primary: primary || (breadth && !iso && i < 3) });
-      spent += cost;
+    const firsts = dedupe(day.slots).filter((sl, i, a) => MIN_PER_SET(sl) >= 3 && a.indexOf(sl) === i);
+    firsts.concat(pr.emphasis).forEach((slot, i) => {
+      if (slots.filter(p => p.slot === slot).length >= 2) return;
+      if (spentOf(slots) + SET_FLOOR * MIN_PER_SET(slot) > budget) return;
+      lay(slots, slot, i < 3 && MIN_PER_SET(slot) >= 3);
     });
-    return { name: day.name, slots, spent };
+    return { name: day.name, slots, wanted: dedupe(day.slots) };
   });
 
-  // Building muscle: spend whatever time is left on the muscles furthest below
-  // ten sets a week, biggest shortfall first, until the clock runs out.
-  if (goal === 'gain') topUp(built, budget * 3.0, SLOTS_FOR_MUSCLE);
+  // Pass 2: dose every major muscle up to the weekly target.
+  fillToTarget(built, budget, shape.weekTarget, slot => {
+    const ex = pool(slot).find(e => !used.has(e.id));
+    if (!ex) return null;
+    used.add(ex.id);
+    return make(slot, ex, false);
+  });
 
-  return built.map(d => ({
-    name: d.name, slots: d.slots,
-    minutes: Math.round(WARMUP_MIN + d.slots.reduce((t, s) => t + s.sets * MIN_PER_SET(s.slot), 0))
-  }));
+  // Pass 3: minutes still left over go to the rest of the day's template
+  // (second helpings, arms, calves, core), at the floor.
+  built.forEach(d => {
+    const have = {};
+    d.slots.forEach(p => { have[p.slot] = (have[p.slot] || 0) + 1; });
+    d.wanted.forEach(slot => {
+      const want = d.wanted.filter(x => x === slot).length;
+      if ((have[slot] || 0) >= want) return;
+      if (spentOf(d.slots) + SET_FLOOR * MIN_PER_SET(slot) > budget) return;
+      lay(d.slots, slot, false);
+      have[slot] = (have[slot] || 0) + 1;
+    });
+  });
+
+  return built.map(d => ({ name: d.name, slots: d.slots, minutes: sessionMinutes(d.slots) }));
+}
+
+function sessionMinutes(slots) {
+  return Math.round(WARMUP_MIN + slots.reduce((t, s) => t + (s.sets || SET_FLOOR) * MIN_PER_SET(s.slot), 0));
 }
 
 function dedupe(list) {
@@ -600,7 +658,7 @@ function dedupe(list) {
   return out;
 }
 
-/* Which slots feed which muscle, for the top-up pass. */
+/* Which slots feed which muscle, first choice first, for adding a lift. */
 const SLOTS_FOR_MUSCLE = {
   quads:['squat','unilat'], glutes:['hinge','unilat','squat'], hams:['hinge','unilat'],
   chest:['hpress'], lats:['vpull'], midback:['hpull'], sidedelt:['vpress'],
@@ -608,34 +666,77 @@ const SLOTS_FOR_MUSCLE = {
   calves:['calves'], abs:['core']
 };
 
-function topUp(built, budgetMin, map) {
+function fillToTarget(built, budgetMin, target, newLift) {
   if (!SLOTS_REF) return;
-  for (let guard = 0; guard < 60; guard++) {
-    const v = muscleVolume(built.map(d => ({ slots: d.slots })), SLOTS_REF);
-    const short = MAJOR_MUSCLES
-      .map(m => ({ m, gap: 10 - (v[m] || 0) }))
-      .filter(x => x.gap > 0)
-      .sort((a, b) => b.gap - a.gap)[0];
-    if (!short) return;
-    // find the day with the most time left that carries a slot feeding it
+  const musclesOf = slot => ((SLOTS_REF.find(x => x.id === slot) || {}).muscles) || [];
+  const spentOf = d => d.slots.reduce((t, s) => t + s.sets * MIN_PER_SET(s.slot), 0);
+  for (let guard = 0; guard < 400; guard++) {
+    const v = muscleVolume(built, SLOTS_REF);
+    const gap = m => (MAJOR_MUSCLES.includes(m) ? Math.max(0, target - (v[m] || 0)) : 0);
+    const useful = slot => musclesOf(slot).reduce((t, m, i) => t + Math.min(i === 0 ? 1 : 0.5, gap(m)), 0);
+
     let best = null;
     built.forEach(d => {
-      (map[short.m] || []).forEach(slot => {
-        const p = d.slots.find(x => x.slot === slot);
-        if (!p || p.sets >= SETS_CAP_PER_SLOT) return;
-        const after = d.spent + MIN_PER_SET(slot);
-        if (after > budgetMin) return;
-        if (!best || after < best.after) best = { d, p, slot, after };
+      const left = budgetMin - spentOf(d);
+      d.slots.forEach(p => {
+        if (p.sets >= SETS_CAP_PER_SLOT || left < MIN_PER_SET(p.slot)) return;
+        const u = useful(p.slot);
+        if (u <= 0) return;
+        const score = u / MIN_PER_SET(p.slot);
+        // Equal value per minute: prefer the lift feeding more muscles (a
+        // compound), then the one with fewer sets so work spreads across days.
+        const tie = Math.abs(score - (best ? best.score : -1)) < 1e-9;
+        if (!best || score > best.score + 1e-9 ||
+            (tie && (u > best.u + 1e-9 || (Math.abs(u - best.u) < 1e-9 && p.sets < best.p.sets))))
+          best = { score, u, p };
       });
     });
-    if (!best) return;                       // no time and no room left
-    best.p.sets += 1;
-    best.d.spent = best.after;
+    if (best) { best.p.sets += 1; continue; }
+
+    if (!newLift) return;
+    const short = MAJOR_MUSCLES.filter(m => gap(m) > 0).sort((a, b) => gap(b) - gap(a));
+    let added = false;
+    for (const m of short) {
+      for (const slot of (SLOTS_FOR_MUSCLE[m] || [])) {
+        const cost = SET_FLOOR * MIN_PER_SET(slot);
+        const day = built
+          .filter(d => budgetMin - spentOf(d) >= cost && d.slots.filter(p => p.slot === slot).length < 2)
+          .sort((a, b) => spentOf(a) - spentOf(b))[0];
+        if (!day) continue;
+        const lift = newLift(slot);
+        if (!lift) continue;
+        day.slots.push(lift);
+        added = true;
+        break;
+      }
+      if (added) break;
+    }
+    if (!added) return;
   }
 }
 
+/* Re-dose a plan that already exists, keeping every lift, its load and its
+ * history: sets go back to the floor and are refilled against the target. */
+function reallocateSets(days, { minutes, level, goal }, EX, SUBS) {
+  const budget = Math.max(10, (minutes || 50) - WARMUP_MIN);
+  const used = new Set();
+  days.forEach(d => d.slots.forEach(p => { p.sets = SET_FLOOR; used.add(p.exId); }));
+  const shape = sessionShape({ minutes, level, goal });
+  fillToTarget(days, budget, shape.weekTarget, EX && SUBS ? slot => {
+    const ex = (SUBS[slot] || []).map(id => EX.find(e => e.id === id)).find(e => e && !used.has(e.id));
+    if (!ex) return null;
+    used.add(ex.id);
+    const iso = MIN_PER_SET(slot) < 3;
+    return { slot, exId: ex.id, sets: SET_FLOOR,
+             repLow: iso ? shape.isoLow : shape.repLow, repHigh: iso ? shape.isoHigh : shape.repHigh,
+             load: null, misses: 0, primary: false };
+  } : null);
+  days.forEach(d => { d.minutes = sessionMinutes(d.slots); });
+  return days;
+}
+
 /* SLOTS is passed in from data.js at call time; keep a module-level handle so the
- * top-up pass can read muscle mappings without threading it through. */
+ * fill pass can read muscle mappings without threading it through. */
 let SLOTS_REF = null;
 function setSlots(SLOTS) { SLOTS_REF = SLOTS; }
 
@@ -752,7 +853,7 @@ function muscleVolume(days, SLOTS, setsOf) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { LAYOFFS, layoffById, programScore, weekCapacity, setSlots, muscleVolume, MUSCLE_NAME, MAJOR_MUSCLES,
+  module.exports = { rankPrograms, LAYOFFS, layoffById, weeklyTarget, reallocateSets, fillToTarget, sessionMinutes, SET_FLOOR, programScore, weekCapacity, setSlots, muscleVolume, MUSCLE_NAME, MAJOR_MUSCLES,
                      BLOCK_LENGTHS, blockRir, isDeload, blockSets, LEVELS, levelById, loadStep, sessionShape, PROGRAMS, programsFor,
                      programById, buildProgram, jointAction, mildRun, JOINT_LEVELS,
                      toUnit, fromUnit, unitStep, suggestSet, SPLITS,
